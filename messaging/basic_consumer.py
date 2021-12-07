@@ -1,0 +1,229 @@
+"""AMQP Basic Consumer"""
+import functools
+import logging
+import uuid
+from typing import Optional
+
+import pika
+import pika.channel
+import pika.frame
+
+from pydantic import stricturl
+
+
+class BasicAMQPConsumer:
+    """
+    This consumer works asynchronously and consumes messages from a specified RabbitMQ server via
+    the AMQP v0-9-1 protocol. The consumer is based on the example made by the pika library.
+    Furthermore, this consumer will import an executor module which will handle the execution of
+    some actions based on the messages content and headers.
+    """
+
+    def __init__(
+            self,
+            amqp_url: stricturl(strip_whitespace=True, allowed_schemes={'amqp'}),
+            amqp_exchange: str,
+            amqp_queue: str,
+            amqp_routing_key: str
+    ):
+        """Create a new BasicAMQPConsumer
+
+        This consumer will not connect itself to the message broker and start listening to the
+        queue on the exchange with the routing key.
+
+        :param amqp_url: URL containing the connection settings to the AMQP Message Broker
+        :type amqp_url: str
+        :param amqp_exchange: Name of the exchange which this consumer will use to listen to
+        :type amqp_exchange: str
+        :param amqp_queue: Name of the queue the consumer will bind itself to
+        :type amqp_queue: str
+        :param amqp_routing_key: Routing key for which the consumer will fetch the messages for
+        :type amqp_routing_key: str
+        """
+        # Save all properties privately to the object
+        self.__amqp_url = amqp_url
+        self.__amqp_exchange = amqp_exchange
+        self.__amqp_queue = amqp_queue
+        self.__amqp_routing_key = amqp_routing_key
+        self.__logger = logging.getLogger(__name__)
+
+        # Initializing some attributes for later usage
+        self.__connection: Optional[pika.SelectConnection] = None
+        self.__channel: Optional[pika.channel.Channel] = None
+        self.__prefetch_count = 0
+        self.__consumer_tag = None
+        self.__consuming = False
+        self.__closing = False
+
+        self.should_reconnect = False
+        """Indicates if a supported consumer should try to reconnect to the message broker"""
+
+    def connect(self) -> pika.SelectConnection:
+        """Open a connection to the AMQP message broker
+
+        :return: Connection to the message broker
+        :rtype: pika.SelectConnection
+        """
+        self.__logger.info(
+            'Connecting to the message broker on %s',
+            self.__amqp_url.host
+        )
+        connection_parameters = pika.URLParameters(self.__amqp_url)
+        # Set a connection name to identify it in the rabbitmq dashboard
+        connection_parameters.client_properties = {
+            'connection_name': 'water-usage-forecasts#' + str(uuid.uuid4())
+        }
+        # Create the connection
+        return pika.SelectConnection(
+            parameters=connection_parameters,
+            on_open_callback=self.__callback_connection_opened,
+            on_open_error_callback=self.__callback_connection_error,
+            on_close_callback=self.__callback_connection_closed
+        )
+
+    def stop(self):
+        """Close the existing message broker connection in a clean way"""
+        if not self.__closing:
+            self.__closing = True
+            self.__logger.info("Closing the connection to the message broker")
+            if self.__consuming:
+                self.__stop_consuming()
+            self.__connection.ioloop.stop()
+            self.__logger.info("Closed the connection to the message broker")
+        else:
+            self.__logger.warning("The connection is already being closed!")
+
+    def __open_channel(self):
+        """Open a new channel to the message broker"""
+        self.__logger.info('Trying to open a new channel to the message broker')
+        self.__connection.channel(on_open_callback=self.__callback_channel_opened)
+
+    def __close_channel(self):
+        """Close the current channel"""
+        self.__logger.info(
+            "Closing the current channel (channel ID: %s)",
+            self.__channel.channel_number
+        )
+        self.__channel.close()
+
+    def __close_connection(self):
+        """Close the connection to the message broker"""
+        self.__consuming = False
+        # Check the internal status of the connection
+        if self.__connection.is_closing:
+            self.__logger.warning("The connection to the message broker is already closing")
+        elif self.__connection.is_closed:
+            self.__logger.error("The connection to the message broker was closed already")
+        else:
+            self.__logger.info("Closing the connection to the message broker")
+            self.__connection.close()
+
+    def __stop_consuming(self):
+        """This will stop the consuming of messages by this consumer"""
+        if self.__channel:
+            self.__logger.info('Canceling the consuming process')
+            # Creating a callback
+            __callback = functools.partial(
+                self.__callback_cancel_ok, userdata=self.__consumer_tag
+            )
+            self.__channel.basic_cancel(self.__consumer_tag, __callback)
+
+    def __reconnect(self):
+        """Set the reconnection need to true
+
+        :return:
+        """
+        self.should_reconnect = True
+        self.stop()
+
+    def __callback_connection_opened(self, __connection):
+        """Callback for a successful connection attempt.
+
+        If this callback is called, the consumer will try to open up a channel
+
+        :param __connection: Connection handle which was opened
+        """
+        self.__logger.info('Opened connection to message broker.')
+        self.__open_channel()
+
+    def __callback_connection_error(
+            self,
+            __connection: pika.BaseConnection,
+            __error: Exception
+    ):
+        """Callback for a failed connection attempt
+
+        :param __connection: Connection which could not be established
+        :type __connection: pika.BaseConnection
+        :param __error: Connection error
+        :type __error: Exception
+        """
+        self.__logger.error(
+            'An error occurred during the connection attempt to the message broker: %s. Retrying '
+            'in 5 seconds',
+            __error
+        )
+        self.__connection.ioloop.call_later(5, self.__connection.ioloop.close)
+
+    def __callback_connection_closed(
+            self,
+            __connection: pika.connection.Connection,
+            __reason: Exception
+    ):
+        """Callback for an unexpected connection closure
+
+        :param __connection: The connection which was closed
+        :param __reason: The closure reason
+        """
+        self.__channel = None
+        if self.__closing:
+            self.__connection.ioloop.stop()
+        else:
+            self.__logger.warning(
+                "The connection (Connection Name: %s) was closed unexpected: %s",
+                __connection.params.client_properties.get("connection_name"),
+                __reason
+            )
+            self.__reconnect()
+
+    def __callback_channel_opened(self, __channel: pika.channel.Channel):
+        """Callback for a successfully opened channel
+
+        This will save the channel to the object and try to set up an exchange on this channel
+        """
+        self.__logger.info(
+            'Opened channel (Channel ID: %s) to the message broker',
+            __channel.channel_number
+        )
+        self.__channel = __channel
+        # Add a callback which fires if the channel was closed
+        self.__channel.add_on_close_callback(self.__callback_channel_closed)
+
+    def __callback_channel_closed(
+            self,
+            __channel: pika.channel.Channel,
+            __reason: Exception
+    ):
+        """Callback for a closed channel
+
+        :param __channel: The closed channel
+        :type __channel: pika.channel.Channel
+        :param __reason: Reason for closing the channel
+        :type __reason: Exception
+        """
+        self.__logger.warning(
+            'The channel (Channel ID: %s) was closed for the following reason: %s',
+            __channel.channel_number,
+            __reason
+        )
+        # Close the connection to the message broker
+        self.__close_connection()
+
+    def __callback_cancel_ok(
+            self,
+            __frame: pika.frame.Method,
+            userdata: str
+    ):
+        self.__logger.info("Channel was cancelled successfully")
+        self.__consuming = False
+        self.__close_channel()
