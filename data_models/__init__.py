@@ -1,5 +1,5 @@
 """Module for describing incoming and outgoing data and settings"""
-from pydantic import BaseSettings, Field, conint, constr
+from pydantic import BaseSettings, Field, conint, constr, stricturl
 
 
 class ServiceSettings(BaseSettings):
@@ -24,3 +24,15 @@ class ServiceSettings(BaseSettings):
     """
     Port of the eureka installation, defaults to port 8761
     """
+
+    amqp_url: stricturl(tld_required=False, allowed_schemes={"amqp"}) = Field(
+        default=...,
+        env="AMQP_URL"
+    )
+    """Connection URL for the message broker"""
+
+    amqp_exchange: str = Field(
+        default='weather-forecasts',
+        env='AMQP_EXCHANGE'
+    )
+    """Name of the amqp exchange the consumer will bind itself to."""
