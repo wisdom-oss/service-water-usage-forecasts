@@ -25,7 +25,7 @@ class BasicAMQPConsumer:
 
     def __init__(
             self,
-            amqp_url: stricturl(strip_whitespace=True, allowed_schemes={'amqp'}),
+            amqp_url: stricturl(allowed_schemes={'amqp'}, tld_required=False),
             amqp_exchange: str,
             amqp_queue: str,
             amqp_routing_key: str
