@@ -58,7 +58,24 @@ class BasicAMQPConsumer:
         self.should_reconnect = False
         """Indicates if a supported consumer should try to reconnect to the message broker"""
 
-    def connect(self) -> pika.SelectConnection:
+    def start(self):
+        """Start the consumer and the consuming process"""
+        self.__connection = self.__connect()
+        self.__connection.ioloop.start()
+
+    def stop(self):
+        """Close the existing message broker connection in a clean way"""
+        if not self.__closing:
+            self.__closing = True
+            self.__logger.info("Closing the connection to the message broker")
+            if self.__consuming:
+                self.__stop_consuming()
+            self.__connection.ioloop.stop()
+            self.__logger.info("Closed the connection to the message broker")
+        else:
+            self.__logger.debug("The connection is already being closed!")
+
+    def __connect(self) -> pika.SelectConnection:
         """Open a connection to the AMQP message broker
 
         :return: Connection to the message broker
@@ -66,7 +83,7 @@ class BasicAMQPConsumer:
         """
         self.__logger.info(
             'Connecting to the message broker on %s',
-            self.__amqp_url.host
+            self.__amqp_url
         )
         connection_parameters = pika.URLParameters(self.__amqp_url)
         # Set a connection name to identify it in the rabbitmq dashboard
@@ -80,18 +97,6 @@ class BasicAMQPConsumer:
             on_open_error_callback=self.__callback_connection_error,
             on_close_callback=self.__callback_connection_closed
         )
-
-    def stop(self):
-        """Close the existing message broker connection in a clean way"""
-        if not self.__closing:
-            self.__closing = True
-            self.__logger.info("Closing the connection to the message broker")
-            if self.__consuming:
-                self.__stop_consuming()
-            self.__connection.ioloop.stop()
-            self.__logger.info("Closed the connection to the message broker")
-        else:
-            self.__logger.warning("The connection is already being closed!")
 
     def __open_channel(self):
         """Open a new channel to the message broker"""
@@ -111,9 +116,9 @@ class BasicAMQPConsumer:
         self.__consuming = False
         # Check the internal status of the connection
         if self.__connection.is_closing:
-            self.__logger.warning("The connection to the message broker is already closing")
+            self.__logger.debug("The connection to the message broker is already closing")
         elif self.__connection.is_closed:
-            self.__logger.error("The connection to the message broker was closed already")
+            self.__logger.debug("The connection to the message broker was closed already")
         else:
             self.__logger.info("Closing the connection to the message broker")
             self.__connection.close()
