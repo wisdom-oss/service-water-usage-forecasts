@@ -28,7 +28,6 @@ class BasicAMQPConsumer:
             amqp_url: stricturl(allowed_schemes={'amqp'}, tld_required=False),
             amqp_exchange: str,
             amqp_queue: str,
-            amqp_routing_key: str
     ):
         """Create a new BasicAMQPConsumer
 
@@ -41,14 +40,11 @@ class BasicAMQPConsumer:
         :type amqp_exchange: str
         :param amqp_queue: Name of the queue the consumer will bind itself to
         :type amqp_queue: str
-        :param amqp_routing_key: Routing key for which the consumer will fetch the messages for
-        :type amqp_routing_key: str
         """
         # Save all properties privately to the object
         self.__amqp_url = amqp_url
         self.__amqp_exchange = amqp_exchange
         self.__amqp_queue = amqp_queue
-        self.__amqp_routing_key = amqp_routing_key
         self.__logger = logging.getLogger(__name__)
 
         # Initializing some attributes for later usage
