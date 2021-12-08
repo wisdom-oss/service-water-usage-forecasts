@@ -1,14 +1,18 @@
 """AMQP Basic Consumer"""
 import functools
+import json
 import logging
 import uuid
 from typing import Optional
 
 import pika
 import pika.channel
+import pika.exchange_type
 import pika.frame
 
 from pydantic import stricturl
+
+from messaging import executor
 
 
 class BasicAMQPConsumer:
@@ -122,11 +126,7 @@ class BasicAMQPConsumer:
         """This will stop the consuming of messages by this consumer"""
         if self.__channel:
             self.__logger.info('Canceling the consuming process')
-            # Creating a callback
-            __callback = functools.partial(
-                self.__callback_cancel_ok, userdata=self.__consumer_tag
-            )
-            self.__channel.basic_cancel(self.__consumer_tag, __callback)
+            self.__channel.basic_cancel(self.__consumer_tag, self.__callback_cancel_ok)
 
     def __reconnect(self):
         """Set the reconnection need to true
@@ -135,6 +135,51 @@ class BasicAMQPConsumer:
         """
         self.should_reconnect = True
         self.stop()
+
+    def __setup_exchange(self):
+        """Set up the exchange on the channel present in the consumer
+
+        :return:
+        """
+        self.__logger.info(
+            'Setting up the exchange "%s" on the channel #%i',
+            self.__amqp_exchange, self.__channel.channel_number
+        )
+        # Create a callback for the successful creation
+        self.__channel.exchange_declare(
+            exchange=self.__amqp_exchange,
+            exchange_type=pika.exchange_type.ExchangeType.fanout.value,
+            callback=self.__callback_exchange_declare_ok
+        )
+
+    def __setup_queue(self):
+        """Set up a queue which is attached to the fanout exchange
+
+        :return:
+        """
+        self.__logger.info(
+            'Trying to declare a queue on the exchange "%s"',
+            self.__amqp_exchange
+        )
+        self.__channel.queue_declare(
+            queue=self.__amqp_queue,
+            callback=self.__callback_queue_declare_ok
+        )
+
+    def __enable_message_consuming(self):
+        """This will start the consuming of messages by this consumer
+
+        :return:
+        """
+        self.__logger.info(
+            'Starting to consume messages from exchange %s',
+            self.__amqp_exchange
+        )
+        self.__channel.add_on_cancel_callback(self.__callback_consumer_cancelled)
+        self.__consumer_tag = self.__channel.basic_consume(
+            queue=self.__amqp_queue,
+            on_message_callback=self.__callback_new_message
+        )
 
     def __callback_connection_opened(self, __connection):
         """Callback for a successful connection attempt.
@@ -198,6 +243,8 @@ class BasicAMQPConsumer:
         self.__channel = __channel
         # Add a callback which fires if the channel was closed
         self.__channel.add_on_close_callback(self.__callback_channel_closed)
+        # Set up the exchange on the channel
+        self.__setup_exchange()
 
     def __callback_channel_closed(
             self,
@@ -222,8 +269,142 @@ class BasicAMQPConsumer:
     def __callback_cancel_ok(
             self,
             __frame: pika.frame.Method,
-            userdata: str
     ):
+        """Callback which is called if the channel was cancelled successfully
+
+        :param __frame:
+        :return:
+        """
         self.__logger.info("Channel was cancelled successfully")
         self.__consuming = False
         self.__close_channel()
+
+    def __callback_exchange_declare_ok(
+            self,
+            __frame: pika.frame.Method,
+    ):
+        """Callback used for a successful exchange declaration on the message broker
+
+        :param __frame: Method frame
+        """
+        self.__logger.info(
+            'Successfully declared the exchange %s on the channel #%i',
+            self.__amqp_exchange, self.__channel.channel_number
+        )
+        self.__setup_queue()
+
+    def __callback_queue_declare_ok(
+            self,
+            __frame: pika.frame.Method,
+    ):
+        """Callback for successfully declaring a queue on an exchange
+
+        :param __frame: Frame indicating the status of the executed command
+        :return:
+        """
+        self.__logger.info(
+            'Successfully declared queue "%s" on exchange "%s"',
+            self.__amqp_queue, self.__amqp_exchange
+        )
+        self.__channel.queue_bind(
+            queue=self.__amqp_queue,
+            exchange=self.__amqp_exchange,
+            callback=self.__callback_queue_bind_ok
+        )
+
+    def __callback_queue_bind_ok(
+            self,
+            __frame: pika.frame.Method
+    ):
+        """Callback for a successful queue bind
+
+        :param __frame:
+        :return:
+        """
+        self.__logger.info(
+            'Successfully bound queue "%s" to the exchange "%s"',
+            self.__amqp_queue, self.__amqp_exchange
+        )
+        self.__channel.basic_qos(
+            prefetch_count=self.__prefetch_count,
+            callback=self.__callback_basic_qos_ok
+        )
+
+    def __callback_basic_qos_ok(
+            self,
+            __frame: pika.frame.Method
+    ):
+        """Callback for a successful QOS (Quality of Service) setup
+
+        :param __frame:
+        :return:
+        """
+        self.__logger.info(
+            'Successfully set the QOS prefetch count to %d',
+            self.__prefetch_count
+        )
+        self.__enable_message_consuming()
+
+    def __callback_consumer_cancelled(
+            self,
+            __frame: pika.frame.Method
+    ):
+        """Callback which will be called if the consumer was cancelled
+
+        :param __frame:
+        :return:
+        """
+        self.__logger.warning(
+            'Consumer was cancelled. The consumer will shutdown: %s',
+            __frame
+        )
+        if self.__channel:
+            self.__channel.close()
+
+    def __callback_new_message(
+            self,
+            channel: pika.channel.Channel,
+            delivery: pika.spec.Basic.Deliver,
+            properties: pika.spec.BasicProperties,
+            content: bytes
+    ):
+        """Callback for new messages read from the server
+
+        :param channel: Channel used to get the message
+        :param delivery: Basic information about the message delivery
+        :param properties: Message properties
+        :param content: Message content
+        """
+        self.__logger.debug(
+            'Received new message (message id: #%s) via exchange "%s"',
+            delivery.delivery_tag, delivery.exchange
+        )
+        # Try to read the incoming message. The expected content type is json
+        try:
+            message = json.loads(content)
+        except json.JSONDecodeError as error:
+            # Reject the message if the content could not be parsed
+            channel.basic_reject(
+                delivery_tag=delivery.delivery_tag,
+                requeue=False
+            )
+            response_content = {
+                'error': 'json_parse_error',
+                'error_description': 'The message could not be parsed as json. The parser '
+                                     'reported the following issue: %s'.format(error)
+            }
+            return self.__channel.basic_publish(
+                exchange='',
+                routing_key=properties.reply_to,
+                body=json.dumps(response_content, ensure_ascii=False).encode('utf-8')
+            )
+        # Acknowledge the message
+        channel.basic_ack(delivery_tag=delivery.delivery_tag)
+        # Run the executer by passing the whole message to it and let the executor decide what to do
+        response_content = executor.execute(message)
+        # Send the response back to the message broker
+        channel.basic_publish(
+            exchange='',
+            routing_key=properties.reply_to,
+            body=json.dumps(response_content, ensure_ascii=False).encode('utf-8')
+        )
