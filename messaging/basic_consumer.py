@@ -70,10 +70,11 @@ class BasicAMQPConsumer:
             self.__logger.info("Closing the connection to the message broker")
             if self.__consuming:
                 self.__stop_consuming()
-            self.__connection.ioloop.stop()
+                self.__connection.ioloop.start()
             self.__logger.info("Closed the connection to the message broker")
         else:
             self.__logger.debug("The connection is already being closed!")
+            self.__connection.ioloop.stop()
 
     def __connect(self) -> pika.SelectConnection:
         """Open a connection to the AMQP message broker
@@ -88,7 +89,7 @@ class BasicAMQPConsumer:
         connection_parameters = pika.URLParameters(self.__amqp_url)
         # Set a connection name to identify it in the rabbitmq dashboard
         connection_parameters.client_properties = {
-            'connection_name': 'water-usage-forecasts#' + str(uuid.uuid4())
+            'connection_name': 'water-usage-forecasts#' + str(uuid.uuid1())
         }
         # Create the connection
         return pika.SelectConnection(
@@ -109,11 +110,10 @@ class BasicAMQPConsumer:
             "Closing the current channel (channel ID: %s)",
             self.__channel.channel_number
         )
-        self.__channel.close()
+        self.__close_connection()
 
     def __close_connection(self):
         """Close the connection to the message broker"""
-        self.__consuming = False
         # Check the internal status of the connection
         if self.__connection.is_closing:
             self.__logger.debug("The connection to the message broker is already closing")
@@ -127,7 +127,12 @@ class BasicAMQPConsumer:
         """This will stop the consuming of messages by this consumer"""
         if self.__channel:
             self.__logger.info('Canceling the consuming process')
-            self.__channel.basic_cancel(self.__consumer_tag, self.__callback_cancel_ok)
+            self.__channel.queue_delete(
+                queue=self.__amqp_queue,
+                if_unused=False,
+                if_empty=False,
+                callback=self.__callback_queue_delete_ok
+            )
 
     def __reconnect(self):
         """Set the reconnection need to true
@@ -177,19 +182,23 @@ class BasicAMQPConsumer:
             self.__amqp_exchange
         )
         self.__channel.add_on_cancel_callback(self.__callback_consumer_cancelled)
+        self.__consuming = True
         self.__consumer_tag = self.__channel.basic_consume(
             queue=self.__amqp_queue,
             on_message_callback=self.__callback_new_message
         )
 
-    def __callback_connection_opened(self, __connection):
+    def __callback_connection_opened(self, __connection: pika.BaseConnection):
         """Callback for a successful connection attempt.
 
         If this callback is called, the consumer will try to open up a channel
 
         :param __connection: Connection handle which was opened
         """
-        self.__logger.info('Opened connection to message broker.')
+        self.__logger.info(
+            'Opened connection "%s" to message broker.',
+            __connection.params.client_properties.get('connection_name')
+        )
         self.__open_channel()
 
     def __callback_connection_error(
@@ -330,6 +339,21 @@ class BasicAMQPConsumer:
             prefetch_count=self.__prefetch_count,
             callback=self.__callback_basic_qos_ok
         )
+
+    def __callback_queue_delete_ok(
+            self,
+            __frame: pika.frame.Method
+    ):
+        """Callback for a successful queue bind
+
+        :param __frame:
+        :return:
+        """
+        self.__logger.info(
+            'Successfully deleted queue "%s" from the exchange "%s"',
+            self.__amqp_queue, self.__amqp_exchange
+        )
+        self.__channel.basic_cancel(self.__consumer_tag, self.__callback_cancel_ok)
 
     def __callback_basic_qos_ok(
             self,

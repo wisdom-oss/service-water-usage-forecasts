@@ -63,6 +63,12 @@ class ReconnectingAMQPConsumer:
         self.__should_run = True
         self.__run_consumer()
 
+    def stop(self):
+        self.__should_run = False
+        self.__eureka_client.status_update(INSTANCE_STATUS_DOWN)
+        self.__eureka_client.cancel()
+        self.__consumer.stop()
+
     def __run_consumer(self):
         while self.__should_run:
             self.__eureka_client.status_update(INSTANCE_STATUS_UP)
