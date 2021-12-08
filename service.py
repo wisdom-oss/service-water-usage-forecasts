@@ -42,3 +42,13 @@ if __name__ == '__main__':
     )
     eureka_client.start()
 
+    message_consumer = ReconnectingAMQPConsumer(
+        amqp_url=settings.amqp_url,
+        amqp_exchange=settings.amqp_exchange,
+        eureka_client=eureka_client
+    )
+    try:
+        message_consumer.start()
+    except KeyboardInterrupt:
+        logger.info("STOPPING")
+        message_consumer.stop()
