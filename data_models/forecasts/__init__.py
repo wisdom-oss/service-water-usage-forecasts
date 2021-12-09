@@ -25,7 +25,7 @@ class RealData(BaseModel):
 
     @root_validator
     def check_data_consistency(cls, values):
-        time_period_start, time_period_end, water_usage_amounts = values.values()
+        time_period_start, time_period_end, water_usage_amounts, _ = values.values()
         if time_period_start >= time_period_end:
             raise ValueError('The start of the time period may not be after the end of the time '
                              'period')
