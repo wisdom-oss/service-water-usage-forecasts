@@ -18,7 +18,7 @@ class RealData(BaseModel):
         default=...,
         alias='timePeriodEnd'
     )
-    water_usage_amounts: List[int] = Field(
+    water_usage_amounts: List[float] = Field(
         default=...,
         alias='waterUsageAmounts'
     )
