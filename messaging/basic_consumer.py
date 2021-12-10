@@ -426,7 +426,12 @@ class BasicAMQPConsumer:
         # Acknowledge the message
         channel.basic_ack(delivery_tag=delivery.delivery_tag)
         # Run the executer by passing the whole message to it and let the executor decide what to do
-        response_content = executor.execute(message)
+        try:
+            response_content = executor.execute(message)
+        except Exception as error:
+            response_content = {
+                "error": str(error)
+            }
         # Send the response back to the message broker
         channel.basic_publish(
             exchange='',
