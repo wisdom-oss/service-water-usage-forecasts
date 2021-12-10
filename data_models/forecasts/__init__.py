@@ -23,6 +23,10 @@ class RealData(BaseModel):
         alias='waterUsageAmounts'
     )
 
+    class Config:
+        allow_population_by_field_name = True
+        allow_population_by_alias = True
+
     @root_validator
     def check_data_consistency(cls, values):
         time_period_start, time_period_end, water_usage_amounts, _ = values.values()
@@ -45,3 +49,6 @@ class ForecastRequest(RealData):
         alias='forecastType'
     )
 
+    class Config:
+        allow_population_by_field_name = True
+        allow_population_by_alias = True
