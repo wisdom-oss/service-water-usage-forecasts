@@ -1,9 +1,9 @@
 """Module containing all data models used for forecasts"""
-from typing import List
+from typing import List, Union
 
 from pydantic import BaseModel, Field, root_validator
 
-from data_models.forecasts.enums import ForecastType
+from data_models.forecasts.enums import ConsumerGroup, ForecastType
 
 
 class RealData(BaseModel):
@@ -53,6 +53,52 @@ class ForecastRequest(RealData):
     forecast_type: ForecastType = Field(
         default=...,
         alias='forecastType'
+    )
+
+    class Config:
+        allow_population_by_field_name = True
+        allow_population_by_alias = True
+
+
+class ForecastData(BaseModel):
+    consumer_group: ConsumerGroup = Field(
+        default=...,
+        alias='consumerGroup'
+    )
+    forecast_starts: int = Field(
+        default=...,
+        alias='forecastStart'
+    )
+    forecast_period: int = Field(
+        default=...,
+        alias='forecastPeriod'
+    )
+    forecast_equation: str = Field(
+        default=...,
+        alias='forecastEquation'
+    )
+    forecast_values: List[float] = Field(
+        default=...,
+        alias='forecastValues'
+    )
+
+    class Config:
+        allow_population_by_field_name = True
+        allow_population_by_alias = True
+
+
+class ForecastResponse(BaseModel):
+    forecast_type: ForecastType = Field(
+        default=...,
+        alias='forecastType'
+    )
+    base_data: RealData = Field(
+        default=...,
+        alias='baseData'
+    )
+    prediction_data: Union[ForecastData, List[ForecastData]] = Field(
+        default=...,
+        alias='predictionData'
     )
 
     class Config:
