@@ -3,6 +3,7 @@ from enum import Enum, IntFlag, auto
 
 
 class ForecastType(str, Enum):
+    LOGARITHMIC = "logarithmic"
     LINEAR = "linear"
     POLYNOMIAL = "polynomial"
 
