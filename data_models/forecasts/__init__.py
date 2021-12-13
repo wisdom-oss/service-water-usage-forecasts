@@ -77,6 +77,10 @@ class ForecastData(BaseModel):
         default=...,
         alias='forecastEquation'
     )
+    forecast_score: float = Field(
+        default=...,
+        alias='forecastScore'
+    )
     forecast_values: List[float] = Field(
         default=...,
         alias='forecastValues'

@@ -1,13 +1,11 @@
 """This module will be used to execute the incoming messages"""
 import logging
+
 import numpy as np
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.pipeline import make_pipeline
-import matplotlib.pyplot as plt
-from data_models.forecasts import ConsumerGroup, ForecastData, ForecastRequest, ForecastResponse, \
-    ForecastType, \
-    RealData
+
+from data_models.forecasts import ForecastData, ForecastRequest, ForecastResponse, \
+    ForecastType, RealData
 
 __logger = logging.getLogger(__name__)
 
@@ -36,10 +34,11 @@ def execute(message: dict) -> dict:
     )
     # Create a new array for years to predict outgoing from the end of the available data
     x_to_predict = np.arange(
-        request.time_period_end + 1, stop=request.time_period_end + 1 + 10
+        request.time_period_start, stop=request.time_period_end + 1 + 10
     )
     # Create an array for the y-Axis
     water_usage_amounts = np.array(request.water_usage_amounts)
+    data = None
     if request.forecast_type == ForecastType.LINEAR:
         __logger.info('Running linear forecast of dataset')
         # Initialize the regression model
@@ -53,12 +52,6 @@ def execute(message: dict) -> dict:
             "forecast_values":   model.predict(x_to_predict.reshape((-1, 1))).tolist(),
             "forecast_score":    model.score(x.reshape((-1, 1)), water_usage_amounts)
         }
-        return ForecastResponse(
-            forecast_type=ForecastType.LINEAR,
-            consumer_group=request.consumer_group,
-            base_data=RealData.parse_obj(request.dict(exclude={"forecast_type", "consumer_group"})),
-            prediction_data=ForecastData.parse_obj(data)
-        ).dict(by_alias=True)
     elif request.forecast_type == ForecastType.POLYNOMIAL:
         __logger.info('Running polynomial forecast of the dataset')
         poly = np.polyfit(x, water_usage_amounts, 2)
@@ -68,12 +61,25 @@ def execute(message: dict) -> dict:
             "forecast_period":   10,
             "forecast_equation": f"y = {poly[0].tolist()} * x^2 + {poly[1].tolist()} * x +"
                                  f" {poly[2].tolist()}",
-            "forecast_values":   predicted_data.tolist(),
-            "forecast_score":    np.corrcoef(water_usage_amounts[:10], predicted_data)[0, 1]**2
+            "forecast_values":   predicted_data.tolist()[16:],
+            "forecast_score":    np.corrcoef(water_usage_amounts, predicted_data[:16])[0, 1]**2
         }
+    elif request.forecast_type == ForecastType.LOGARITHMIC:
+        log = np.polyfit(np.log(x), water_usage_amounts, 1)
+        predicted_data = np.poly1d(log)(np.log(x_to_predict))
+        data = {
+            "forecast_starts":   request.time_period_end + 1,
+            "forecast_period":   10,
+            "forecast_equation": f"y = {log[0].tolist()} * log(x) + {log[1].tolist()}",
+            "forecast_values":   predicted_data.tolist()[16:],
+            "forecast_score":    np.corrcoef(water_usage_amounts, predicted_data[:16])[0, 1]**2
+        }
+    if data is not None:
         return ForecastResponse(
-            forecast_type=ForecastType.POLYNOMIAL,
+            forecast_type=request.forecast_type,
             consumer_group=request.consumer_group,
             base_data=RealData.parse_obj(request.dict(exclude={"forecast_type", "consumer_group"})),
             prediction_data=ForecastData.parse_obj(data)
         ).dict(by_alias=True)
+    else:
+        raise Exception("Forecast was not run")
