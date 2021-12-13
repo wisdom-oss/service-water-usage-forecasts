@@ -54,6 +54,10 @@ class ForecastRequest(RealData):
         default=...,
         alias='forecastType'
     )
+    consumer_group: ConsumerGroup = Field(
+        default=...,
+        alias='consumerGroup'
+    )
 
     class Config:
         allow_population_by_field_name = True
@@ -61,10 +65,6 @@ class ForecastRequest(RealData):
 
 
 class ForecastData(BaseModel):
-    consumer_group: ConsumerGroup = Field(
-        default=...,
-        alias='consumerGroup'
-    )
     forecast_starts: int = Field(
         default=...,
         alias='forecastStart'
@@ -91,6 +91,10 @@ class ForecastResponse(BaseModel):
     forecast_type: ForecastType = Field(
         default=...,
         alias='forecastType'
+    )
+    consumer_group: ConsumerGroup = Field(
+        default=...,
+        alias='consumerGroup'
     )
     base_data: RealData = Field(
         default=...,

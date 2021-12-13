@@ -47,15 +47,16 @@ def execute(message: dict) -> dict:
         # Run the linear regression
         model.fit(x.reshape((-1, 1)), water_usage_amounts)
         data = {
-            "forecast_starts": request.time_period_end + 1,
-            "forecast_period": 10,
+            "forecast_starts":   request.time_period_end + 1,
+            "forecast_period":   10,
             "forecast_equation": f"y = {model.coef_[0]} * x + {model.intercept_}",
-            "forecast_values": model.predict(x_to_predict.reshape((-1, 1))).tolist(),
-            "forecast_score": model.score(x.reshape((-1, 1)), water_usage_amounts)
+            "forecast_values":   model.predict(x_to_predict.reshape((-1, 1))).tolist(),
+            "forecast_score":    model.score(x.reshape((-1, 1)), water_usage_amounts)
         }
         return ForecastResponse(
             forecast_type=ForecastType.LINEAR,
-            base_data=RealData.parse_obj(request.dict(exclude={"forecast_type"})),
+            consumer_group=request.consumer_group,
+            base_data=RealData.parse_obj(request.dict(exclude={"forecast_type", "consumer_group"})),
             prediction_data=ForecastData.parse_obj(data)
         ).dict(by_alias=True)
     elif request.forecast_type == ForecastType.POLYNOMIAL:
@@ -63,7 +64,6 @@ def execute(message: dict) -> dict:
         poly = np.polyfit(x, water_usage_amounts, 2)
         predicted_data = np.poly1d(poly)(x_to_predict)
         data = {
-            "consumer_group": ConsumerGroup.HOUSEHOLDS_AND_SMALL_BUSINESSES,
             "forecast_starts":   request.time_period_end + 1,
             "forecast_period":   10,
             "forecast_equation": f"y = {poly[0].tolist()} * x^2 + {poly[1].tolist()} * x +"
@@ -73,6 +73,7 @@ def execute(message: dict) -> dict:
         }
         return ForecastResponse(
             forecast_type=ForecastType.POLYNOMIAL,
-            base_data=RealData.parse_obj(request.dict(exclude={"forecast_type"})),
+            consumer_group=request.consumer_group,
+            base_data=RealData.parse_obj(request.dict(exclude={"forecast_type", "consumer_group"})),
             prediction_data=ForecastData.parse_obj(data)
         ).dict(by_alias=True)
