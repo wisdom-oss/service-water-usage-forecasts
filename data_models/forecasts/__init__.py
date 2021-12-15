@@ -54,7 +54,7 @@ class ForecastRequest(RealData):
         default=...,
         alias='forecastType'
     )
-    consumer_group: ConsumerGroup = Field(
+    consumer_group: List[ConsumerGroup] = Field(
         default=...,
         alias='consumerGroup'
     )
@@ -96,7 +96,7 @@ class ForecastResponse(BaseModel):
         default=...,
         alias='forecastType'
     )
-    consumer_group: ConsumerGroup = Field(
+    consumer_group: List[ConsumerGroup] = Field(
         default=...,
         alias='consumerGroup'
     )

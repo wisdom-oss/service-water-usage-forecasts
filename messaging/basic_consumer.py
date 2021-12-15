@@ -436,5 +436,8 @@ class BasicAMQPConsumer:
         channel.basic_publish(
             exchange='',
             routing_key=properties.reply_to,
+            properties=pika.BasicProperties(
+                correlation_id=properties.correlation_id
+            ),
             body=json.dumps(response_content, ensure_ascii=False).encode('utf-8')
         )

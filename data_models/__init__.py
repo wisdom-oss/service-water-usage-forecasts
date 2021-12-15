@@ -32,7 +32,7 @@ class ServiceSettings(BaseSettings):
     """Connection URL for the message broker"""
 
     amqp_exchange: str = Field(
-        default='water-usage-forecaster',
+        default='weather-forecast-requests',
         env='AMQP_EXCHANGE'
     )
     """Name of the amqp exchange the consumer will bind itself to."""
