@@ -54,7 +54,7 @@ class ForecastRequest(RealData):
         default=...,
         alias='forecastType'
     )
-    consumer_group: List[ConsumerGroup] = Field(
+    consumer_group: ConsumerGroup = Field(
         default=...,
         alias='consumerGroup'
     )
@@ -67,23 +67,23 @@ class ForecastRequest(RealData):
 class ForecastData(BaseModel):
     forecast_starts: int = Field(
         default=...,
-        alias='forecastStart'
+        alias='start'
     )
     forecast_period: int = Field(
         default=...,
-        alias='forecastPeriod'
+        alias='timePeriod'
     )
     forecast_equation: str = Field(
         default=...,
-        alias='forecastEquation'
+        alias='equation'
     )
     forecast_score: float = Field(
         default=...,
-        alias='forecastScore'
+        alias='score'
     )
     forecast_values: List[float] = Field(
         default=...,
-        alias='forecastValues'
+        alias='usageAmounts'
     )
 
     class Config:
@@ -96,17 +96,17 @@ class ForecastResponse(BaseModel):
         default=...,
         alias='forecastType'
     )
-    consumer_group: List[ConsumerGroup] = Field(
+    consumer_group: ConsumerGroup = Field(
         default=...,
         alias='consumerGroup'
     )
     base_data: RealData = Field(
         default=...,
-        alias='baseData'
+        alias='reference'
     )
-    prediction_data: Union[ForecastData, List[ForecastData]] = Field(
+    prediction_data: ForecastData = Field(
         default=...,
-        alias='predictionData'
+        alias='forecast'
     )
 
     class Config:
