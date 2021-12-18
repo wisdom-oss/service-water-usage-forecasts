@@ -49,7 +49,7 @@ def execute(message: dict) -> dict:
             "forecast_starts":   request.time_period_end + 1,
             "forecast_period":   10,
             "forecast_equation": f"y = {model.coef_[0]} * x + {model.intercept_}",
-            "forecast_values":   model.predict(x_to_predict.reshape((-1, 1))).tolist(),
+            "forecast_values":   model.predict(x_to_predict.reshape((-1, 1))).tolist()[16:],
             "forecast_score":    model.score(x.reshape((-1, 1)), water_usage_amounts)
         }
     elif request.forecast_type == ForecastType.POLYNOMIAL:
