@@ -10,6 +10,7 @@ WORKDIR /opt/water-usage-forecast
 # Copy and install the requirements
 COPY . /opt/water-usage-forecast
 RUN python -m pip install --no-cache -r /opt/water-usage-forecast/requirements.txt
+RUN apt-get update && apt-get install wait-for-it
 # Switch to the just created user and into the home directory
 USER water-usage-forecast
 ENTRYPOINT ["python", "service.py"]

@@ -1,6 +1,7 @@
 """Module implementing a consumer which will reonnect itself if the need arises"""
 import asyncio
 import logging
+import subprocess
 import sys
 import time
 import uuid
@@ -55,6 +56,8 @@ class ReconnectingAMQPConsumer:
 
     def start(self):
         """Start the consumer"""
+        subprocess.run(f"wait-for-it {self.__amqp_url.host}:{self.__amqp_url.port} -s -q -t 0 -- "
+                       f"echo \"RABBITMQ REACHABLE. STARTING CONNECTION\"")
         self.__consumer = BasicAMQPConsumer(
             amqp_url=self.__amqp_url,
             amqp_queue=self.__amqp_queue,
