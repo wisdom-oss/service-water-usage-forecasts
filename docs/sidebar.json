@@ -1,0 +1,32 @@
+{
+  "items": [
+    {
+      "items": [
+        {
+          "items": [
+            "data_models/forecasts/__init__",
+            "data_models/forecasts/enums"
+          ],
+          "label": "data_models.forecasts",
+          "type": "category"
+        },
+        "data_models/__init__"
+      ],
+      "label": "data_models",
+      "type": "category"
+    },
+    {
+      "items": [
+        "messaging/__init__",
+        "messaging/basic_consumer",
+        "messaging/executor",
+        "messaging/reconnecting_consumer"
+      ],
+      "label": "messaging",
+      "type": "category"
+    },
+    "service"
+  ],
+  "label": "Reference",
+  "type": "category"
+}
