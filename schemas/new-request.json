@@ -1,0 +1,62 @@
+{
+    "title": "Forecast Request",
+    "definitions": {
+        "ForecastType": {
+            "title": "ForecastType",
+            "description": "An enumeration.",
+            "enum": [
+                "logarithmic",
+                "linear",
+                "polynomial"
+            ],
+            "type": "string"
+        },
+        "ConsumerGroup": {
+            "title": "ConsumerGroup",
+            "description": "An enumeration.",
+            "enum": [
+                "businesses",
+                "households_and_small_businesses",
+                "farming_forestry_fishing_industry",
+                "public_institutions",
+                "all"
+            ],
+            "type": "string"
+        },
+        "ForecastRequest": {
+            "title": "ForecastRequest",
+            "description": "Data model for the incoming real water usage data.",
+            "type": "object",
+            "properties": {
+                "timePeriodStart": {
+                    "title": "Forecast Time Period Start",
+                    "type": "integer"
+                },
+                "timePeriodEnd": {
+                    "title": "Forecast Time Period End",
+                    "type": "integer"
+                },
+                "waterUsageAmounts": {
+                    "title": "Water usage amounts",
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "forecastType": {
+                    "$ref": "#/definitions/ForecastType"
+                },
+                "consumerGroup": {
+                    "$ref": "#/definitions/ConsumerGroup"
+                }
+            },
+            "required": [
+                "timePeriodStart",
+                "timePeriodEnd",
+                "waterUsageAmounts",
+                "forecastType",
+                "consumerGroup"
+            ]
+        }
+    }
+}
