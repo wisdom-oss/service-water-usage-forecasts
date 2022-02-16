@@ -44,7 +44,7 @@ if __name__ == '__main__':
 
     # Registering the service at the service registry
     eureka_client = py_eureka_client.eureka_client.EurekaClient(
-        eureka_server=f'http://{settings.eureka_hostname}',
+        eureka_server=f'http://{settings.eureka_hostname}:8761',
         app_name='water-usage-forecasts',
         should_discover=False,
         should_register=True,
