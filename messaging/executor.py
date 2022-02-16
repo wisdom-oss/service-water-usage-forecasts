@@ -3,6 +3,7 @@ import logging
 
 import numpy as np
 from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
 
 from data_models.forecasts import ForecastData, ForecastRequest, ForecastResponse, \
     ForecastType, RealData
@@ -45,34 +46,38 @@ def execute(message: dict) -> dict:
         model = LinearRegression()
         # Run the linear regression
         model.fit(x.reshape((-1, 1)), water_usage_amounts)
+        forecast_values = model.predict(x_to_predict.reshape((-1, 1))).tolist()
+        predicted_values = forecast_values[:len(water_usage_amounts)]
         data = {
             "forecast_starts":   request.time_period_end + 1,
             "forecast_period":   10,
             "forecast_equation": f"y = {model.coef_[0]} * x + {model.intercept_}",
-            "forecast_values":   model.predict(x_to_predict.reshape((-1, 1))).tolist()[16:],
-            "forecast_score":    model.score(x.reshape((-1, 1)), water_usage_amounts)
+            "forecast_values":   forecast_values[len(water_usage_amounts):],
+            "forecast_score":    r2_score(water_usage_amounts, predicted_values)
         }
     elif request.forecast_type == ForecastType.POLYNOMIAL:
         __logger.info('Running polynomial forecast of the dataset')
         poly = np.polyfit(x, water_usage_amounts, 2)
-        predicted_data = np.poly1d(poly)(x_to_predict)
+        forecast_values = np.poly1d(poly)(x_to_predict).tolist()
+        predicted_values = forecast_values[:len(water_usage_amounts)]
         data = {
             "forecast_starts":   request.time_period_end + 1,
             "forecast_period":   10,
             "forecast_equation": f"y = {poly[0].tolist()} * x^2 + {poly[1].tolist()} * x +"
                                  f" {poly[2].tolist()}",
-            "forecast_values":   predicted_data.tolist()[16:],
-            "forecast_score":    np.corrcoef(water_usage_amounts, predicted_data[:16])[0, 1]**2
+            "forecast_values":   forecast_values[len(water_usage_amounts):],
+            "forecast_score":    r2_score(water_usage_amounts, predicted_values)
         }
     elif request.forecast_type == ForecastType.LOGARITHMIC:
         log = np.polyfit(np.log(x), water_usage_amounts, 1)
-        predicted_data = np.poly1d(log)(np.log(x_to_predict))
+        forecast_values = np.poly1d(log)(np.log(x_to_predict)).tolist()
+        predicted_values = forecast_values[:len(water_usage_amounts)]
         data = {
             "forecast_starts":   request.time_period_end + 1,
             "forecast_period":   10,
             "forecast_equation": f"y = {log[0].tolist()} * log(x) + {log[1].tolist()}",
-            "forecast_values":   predicted_data.tolist()[16:],
-            "forecast_score":    np.corrcoef(water_usage_amounts, predicted_data[:16])[0, 1]**2
+            "forecast_values":   forecast_values[len(water_usage_amounts):],
+            "forecast_score":    r2_score(water_usage_amounts, predicted_values)
         }
     if data is not None:
         return ForecastResponse(
