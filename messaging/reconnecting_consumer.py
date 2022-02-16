@@ -56,8 +56,8 @@ class ReconnectingAMQPConsumer:
 
     def start(self):
         """Start the consumer"""
-        subprocess.run(f"wait-for-it {self.__amqp_url.host}:{self.__amqp_url.port} -s -q -t 0 -- "
-                       f"echo \"RABBITMQ REACHABLE. STARTING CONNECTION\"")
+        self.__logger.info("Waiting for RabbitMQ to be reachable")
+        subprocess.run(f"wait-for-it {self.__amqp_url.host}:5672 -s -q -t 0", shell=True)
         self.__consumer = BasicAMQPConsumer(
             amqp_url=self.__amqp_url,
             amqp_queue=self.__amqp_queue,

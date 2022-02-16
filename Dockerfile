@@ -13,4 +13,4 @@ RUN python -m pip install --no-cache -r /opt/water-usage-forecast/requirements.t
 RUN apt-get update && apt-get install wait-for-it
 # Switch to the just created user and into the home directory
 USER water-usage-forecast
-ENTRYPOINT ["python", "service.py"]
+ENTRYPOINT wait-for-it ${SERVICE_REGISTRY_HOST}:8761 -s -q -t 0 -- python service.py
