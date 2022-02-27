@@ -5,7 +5,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 
-from data_models.forecasts import ForecastData, ForecastRequest, ForecastResponse, \
+from models.forecasts import ForecastData, ForecastRequest, ForecastResponse, \
     ForecastType, RealData
 
 __logger = logging.getLogger(__name__)

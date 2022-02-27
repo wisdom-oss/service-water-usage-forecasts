@@ -1,21 +1,11 @@
-"""Module implementing a consumer which will reonnect itself if the need arises"""
-import asyncio
 import logging
-import subprocess
-import sys
+import secrets
 import time
-import uuid
+from threading import Event
 from typing import Optional
 
-from py_eureka_client.eureka_client import (
-    EurekaClient,
-    INSTANCE_STATUS_UP,
-    INSTANCE_STATUS_DOWN,
-    INSTANCE_STATUS_OUT_OF_SERVICE
-)
-from pydantic import stricturl
-
 from messaging.basic_consumer import BasicAMQPConsumer
+from settings import AMQPSettings
 
 
 class ReconnectingAMQPConsumer:
@@ -26,62 +16,59 @@ class ReconnectingAMQPConsumer:
 
     def __init__(
             self,
-            amqp_url: stricturl(tld_required=False, allowed_schemes={"amqp"}),
-            amqp_exchange: str,
-            eureka_client: EurekaClient,
-            amqp_queue: str = "water-usage-forecast-service#" + str(uuid.uuid4()),
+            amqp_queue: str = "authorization-service#" + secrets.token_hex(nbytes=4),
             amqp_reconnection_delay: float = 5.0,
             amqp_reconnection_tries: int = 3
     ):
         """Create a new ReconnectingAMQPConsumer
 
-        :param amqp_url: URL pointing to the message broker
-        :param amqp_exchange: Name of the exchange the consumer should attach itself to
-        :param eureka_client: Instance of the service registry client
         :param amqp_queue: Name of the queue which should be bound to the exchange,
             defaults to "water-usage-forecast-service#" + UUID4
         :param amqp_reconnection_delay: Time which should be waited until a reconnection is tried
         :param amqp_reconnection_tries: Number of reconnection attempts
         """
-        self.__amqp_url = amqp_url
-        self.__amqp_exchange = amqp_exchange
-        self.__eureka_client = eureka_client
+        __amqp_settings = AMQPSettings()
+        self.__amqp_url = __amqp_settings.dsn
+        self.__amqp_exchange = __amqp_settings.exchange
         self.__amqp_queue = amqp_queue
         self.__amqp_reconnection_delay = amqp_reconnection_delay
         self.__amqp_reconnection_tries = amqp_reconnection_tries
-        self.__logger = logging.getLogger(__name__)
-        self.__consumer: Optional[BasicAMQPConsumer] = None
-        self.__should_run = False
-        self.__amqp_reconnection_try_counter = 0
-
-    def start(self):
-        """Start the consumer"""
-        self.__logger.info("Waiting for RabbitMQ to be reachable")
-        subprocess.run(f"wait-for-it {self.__amqp_url.host}:5672 -s -q -t 0", shell=True)
-        self.__consumer = BasicAMQPConsumer(
+        self.__logger = logging.getLogger('AMQP.ReconnectingConsumer')
+        self.__consumer: Optional[BasicAMQPConsumer] = BasicAMQPConsumer(
             amqp_url=self.__amqp_url,
             amqp_queue=self.__amqp_queue,
             amqp_exchange=self.__amqp_exchange
         )
-        self.__should_run = True
+        self.stop_event = Event()
+        self.__amqp_reconnection_try_counter = amqp_reconnection_tries
+        self.__logger.info('Created a new ReconnectingConsumer')
+
+    def start(self):
+        """Start the consumer"""
+        self.__logger.info('Clearing any set events.')
+        self.stop_event.clear()
+        self.__logger.info('Starting the contained BasicConsumer')
         self.__run_consumer()
 
     def stop(self):
-        self.__should_run = False
-        self.__eureka_client.status_update(INSTANCE_STATUS_DOWN)
-        self.__eureka_client.cancel()
+        self.__logger.info('Received shutdown trigger')
+        self.stop_event.set()
         self.__consumer.stop()
 
     def __run_consumer(self):
-        while self.__should_run:
-            self.__eureka_client.status_update(INSTANCE_STATUS_UP)
+        while not self.stop_event.is_set():
             self.__consumer.start()
-            self.__eureka_client.status_update(INSTANCE_STATUS_OUT_OF_SERVICE)
             if self.__amqp_reconnection_try_counter < self.__amqp_reconnection_tries:
+                self.__logger.warning('Trying to reconnect to the message broker. Try #%i', self.__amqp_reconnection_tries)
                 self.__reconnect()
             else:
-                self.__eureka_client.status_update(INSTANCE_STATUS_DOWN)
-                sys.exit(2)
+                if not self.__consumer.graceful_shutdown:
+                    self.__logger.critical('The amount of reconnection tries has been exceeded. No '
+                                           'new reconnection try will be executed until the '
+                                           'application is restarted')
+                    self.stop()
+                else:
+                    self.__logger.info('Successfully shut down the Reconnecting Consumer')
 
     def __reconnect(self):
         """Try to reconnect to the message broker

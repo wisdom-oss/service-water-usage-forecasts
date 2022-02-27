@@ -2,17 +2,21 @@
 import functools
 import json
 import logging
+import secrets
+import sys
 import uuid
 from typing import Optional
 
 import pika
 import pika.channel
+import pika.exceptions
 import pika.exchange_type
 import pika.frame
 
-from pydantic import stricturl
+from pydantic import stricturl, AmqpDsn
 
 from messaging import executor
+from settings import ServiceSettings
 
 
 class BasicAMQPConsumer:
@@ -25,7 +29,7 @@ class BasicAMQPConsumer:
 
     def __init__(
             self,
-            amqp_url: stricturl(allowed_schemes={'amqp'}, tld_required=False),
+            amqp_url: AmqpDsn,
             amqp_exchange: str,
             amqp_queue: str,
     ):
@@ -45,7 +49,7 @@ class BasicAMQPConsumer:
         self.__amqp_url = amqp_url
         self.__amqp_exchange = amqp_exchange
         self.__amqp_queue = amqp_queue
-        self.__logger = logging.getLogger(__name__)
+        self.__logger = logging.getLogger('AMQP.BasicConsumer')
 
         # Initializing some attributes for later usage
         self.__connection: Optional[pika.SelectConnection] = None
@@ -57,6 +61,11 @@ class BasicAMQPConsumer:
 
         self.should_reconnect = False
         """Indicates if a supported consumer should try to reconnect to the message broker"""
+        self.graceful_shutdown = False
+        # Get the service name
+        self.__app_id = ServiceSettings().name
+        # Reduce the logging level of pika
+        logging.getLogger("pika").setLevel(logging.WARNING)
 
     def start(self):
         """Start the consumer and the consuming process"""
@@ -70,7 +79,6 @@ class BasicAMQPConsumer:
             self.__logger.info("Closing the connection to the message broker")
             if self.__consuming:
                 self.__stop_consuming()
-                self.__connection.ioloop.start()
             self.__logger.info("Closed the connection to the message broker")
         else:
             self.__logger.debug("The connection is already being closed!")
@@ -89,8 +97,11 @@ class BasicAMQPConsumer:
         connection_parameters = pika.URLParameters(self.__amqp_url)
         # Set a connection name to identify it in the rabbitmq dashboard
         connection_parameters.client_properties = {
-            'connection_name': 'water-usage-forecasts#' + str(uuid.uuid1())
+            'connection_name': secrets.token_urlsafe(nbytes=16),
+            'product':         'WISdoM OSS Water Usage Forecasts',
+            'platform':        'Python {}'.format(sys.version),
         }
+
         # Create the connection
         return pika.SelectConnection(
             parameters=connection_parameters,
@@ -127,6 +138,10 @@ class BasicAMQPConsumer:
         """This will stop the consuming of messages by this consumer"""
         if self.__channel:
             self.__logger.info('Canceling the consuming process')
+            self.__channel.basic_cancel(
+                self.__consumer_tag,
+                callback=self.__callback_cancel_ok
+            )
             self.__channel.queue_delete(
                 queue=self.__amqp_queue,
                 if_unused=False,
@@ -185,8 +200,17 @@ class BasicAMQPConsumer:
         self.__consuming = True
         self.__consumer_tag = self.__channel.basic_consume(
             queue=self.__amqp_queue,
-            on_message_callback=self.__callback_new_message
+            on_message_callback=self.__callback_new_message,
+            callback=self.__callback_consume_started
         )
+
+    def __callback_consume_started(self, __consume_status: pika.frame.Method):
+        """Callback for a successfully started consume session
+
+        :param __consume_status:
+        :return:
+        """
+        self.__logger.info('Successfully started consuming messages')
 
     def __callback_connection_opened(self, __connection: pika.BaseConnection):
         """Callback for a successful connection attempt.
@@ -235,7 +259,7 @@ class BasicAMQPConsumer:
             self.__connection.ioloop.stop()
         else:
             self.__logger.warning(
-                "The connection (Connection Name: %s) was closed unexpected: %s",
+                'The connection (Connection Name: "%s") was closed unexpected: %s',
                 __connection.params.client_properties.get("connection_name"),
                 __reason
             )
@@ -268,13 +292,22 @@ class BasicAMQPConsumer:
         :param __reason: Reason for closing the channel
         :type __reason: Exception
         """
-        self.__logger.warning(
-            'The channel (Channel ID: %s) was closed for the following reason: %s',
-            __channel.channel_number,
-            __reason
-        )
-        # Close the connection to the message broker
-        self.__close_connection()
+        if isinstance(__reason, pika.exceptions.ConnectionClosedByBroker):
+            self.__logger.warning('The connection was closed by the message broker. Trying to '
+                                  'reconnect')
+            self.__reconnect()
+        elif isinstance(__reason, pika.exceptions.ChannelClosedByClient):
+            self.graceful_shutdown = True
+            self.__logger.info('The channel (Channel ID: %s) was closed successfully during a '
+                               'graceful shutdown', __channel.channel_number)
+        else:
+            self.__logger.warning(
+                'The channel (Channel ID: %s) was closed for the following reason: %s',
+                __channel.channel_number,
+                __reason
+            )
+            # Close the connection to the message broker
+            self.__close_connection()
 
     def __callback_cancel_ok(
             self,
@@ -353,7 +386,6 @@ class BasicAMQPConsumer:
             'Successfully deleted queue "%s" from the exchange "%s"',
             self.__amqp_queue, self.__amqp_exchange
         )
-        self.__channel.basic_cancel(self.__consumer_tag, self.__callback_cancel_ok)
 
     def __callback_basic_qos_ok(
             self,
@@ -390,19 +422,24 @@ class BasicAMQPConsumer:
             self,
             channel: pika.channel.Channel,
             delivery: pika.spec.Basic.Deliver,
-            properties: pika.spec.BasicProperties,
+            props: pika.spec.BasicProperties,
             content: bytes
     ):
         """Callback for new messages read from the server
 
         :param channel: Channel used to get the message
         :param delivery: Basic information about the message delivery
-        :param properties: Message properties
+        :param props: Message properties
         :param content: Message content
         """
-        self.__logger.debug(
+        self.__logger.info(
             'Received new message (message id: #%s) via exchange "%s"',
             delivery.delivery_tag, delivery.exchange
+        )
+        # Create some message properties for every response
+        _msg_properties = pika.BasicProperties(
+            correlation_id=props.correlation_id if props.correlation_id is not None else "",
+            app_id=self.__app_id
         )
         # Try to read the incoming message. The expected content type is json
         try:
@@ -420,12 +457,12 @@ class BasicAMQPConsumer:
             }
             return self.__channel.basic_publish(
                 exchange='',
-                routing_key=properties.reply_to,
+                routing_key=props.reply_to,
                 body=json.dumps(response_content, ensure_ascii=False).encode('utf-8')
             )
         # Acknowledge the message
         channel.basic_ack(delivery_tag=delivery.delivery_tag)
-        # Run the executer by passing the whole message to it and let the executor decide what to do
+        # Run the executor by passing the whole message to it and let the executor decide what to do
         try:
             response_content = executor.execute(message)
         except Exception as error:
@@ -435,9 +472,9 @@ class BasicAMQPConsumer:
         # Send the response back to the message broker
         channel.basic_publish(
             exchange='',
-            routing_key=properties.reply_to,
+            routing_key=props.reply_to,
             properties=pika.BasicProperties(
-                correlation_id=properties.correlation_id
+                correlation_id=props.correlation_id
             ),
             body=json.dumps(response_content, ensure_ascii=False).encode('utf-8')
         )
