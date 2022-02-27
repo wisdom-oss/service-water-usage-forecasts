@@ -3,7 +3,7 @@ from typing import List, Union
 
 from pydantic import BaseModel, Field, root_validator
 
-from data_models.forecasts.enums import ConsumerGroup, ForecastType
+from models.forecasts.enums import ConsumerGroup, ForecastType
 
 
 class RealData(BaseModel):
