@@ -31,11 +31,11 @@ def execute(message: dict) -> dict:
         }
     # Create a numpy array for the x-Axis
     x = np.arange(
-        request.time_period_start + 1, stop=request.time_period_end
+        request.time_period_start, stop=request.time_period_end + 1
     )
     # Create a new array for years to predict outgoing from the end of the available data
     x_to_predict = np.arange(
-        request.time_period_start + 1, stop=request.time_period_end + 10
+        request.time_period_start, stop=request.time_period_end + 11
     )
     # Create an array for the y-Axis
     water_usage_amounts = np.array(request.water_usage_amounts)
