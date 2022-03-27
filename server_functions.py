@@ -58,9 +58,7 @@ def executor(message: bytes) -> bytes:
         # Now calculate the r² value
         forecast_r2 = sklearn.metrics.r2_score(y_axis, predicted_current_values)
         # Now build the equation for the forecast model
-        equation = "y = {} * x + {}".format(
-            curve.coef[0], curve.coef[1]
-        )
+        equation = str(curve)
         # Now pre-build the response object
         forecasted_usages = models.shared.WaterUsages(
             start=request.usage_data.end + 1,
@@ -85,14 +83,11 @@ def executor(message: bytes) -> bytes:
         # Now calculate the r² value
         forecast_r2 = sklearn.metrics.r2_score(y_axis, predicted_current_values)
         # Now build the equation for the forecast model
-        equation = "y = {} * x^2 + {} * x + {}".format(
-            curve.coef[0], curve.coef[1], curve.coef[2]
-
-        )
+        equation = str(curve)
         # Now pre-build the response object
         forecasted_usages = models.shared.WaterUsages(
             start=request.usage_data.end + 1,
-            end=request.usage_data.end + 1 + request.predicted_years,
+            end=request.usage_data.end + request.predicted_years,
             usages=forecasted_values
         )
         forecast_result = {
@@ -113,19 +108,16 @@ def executor(message: bytes) -> bytes:
         # Now calculate the r² value
         forecast_r2 = sklearn.metrics.r2_score(y_axis, predicted_current_values)
         # Now build the equation for the forecast model
-        equation = "y = {} * log(x) + {}".format(
-            curve.coef[0], curve.coef[1]
-        )
+        equation = str(curve)
         forecasted_usages = models.shared.WaterUsages(
             start=request.usage_data.end + 1,
-            end=request.usage_data.end + 1 + request.predicted_years,
+            end=request.usage_data.end + request.predicted_years,
             usages=forecasted_values
         )
-        # Now build the response object
         forecast_result = {
-            'usage_data':  forecasted_usages,
-            'equation':    equation,
-            'score':       forecast_r2
+            'usage_data': forecasted_usages,
+            'equation':   equation,
+            'score':      forecast_r2
         }
     if forecast_result is not None:
         return models.responses.ForecastResponse(
