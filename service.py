@@ -1,114 +1,83 @@
-"""This file will bootstrap the service and announce it at the service registry"""
+"""Water Usage Forecast Service"""
 import asyncio
 import logging
 import os
 import signal
 import sys
+import threading
 import time
-from threading import Thread
-from typing import Optional
+import typing
 
+import amqp_rpc_server
 import pydantic.error_wrappers
-from py_eureka_client.eureka_client import EurekaClient
 
+import server_functions
+import settings
 import tools
-from messaging.reconnecting_consumer import ReconnectingAMQPConsumer
-from settings import AMQPSettings, ServiceRegistrySettings, ServiceSettings
 
-_amqp_server: Optional[ReconnectingAMQPConsumer] = None
-_amqp_thread: Optional[Thread] = None
+_stop_event = threading.Event()
+_stop_event.clear()
+
+amqp_server: typing.Optional[amqp_rpc_server.Server] = None
 
 
-def signal_handler(signum, frame):
-    raise KeyboardInterrupt
+def signal_handler(sign, frame):
+    logging.info('Received shutdown signal. Stopping the AMQP server')
+    _stop_event.set()
 
 
 if __name__ == '__main__':
-    # Try reading the current settings
-    _service_settings = ServiceSettings()
+    # Read the service settings and configure the logging
+    _service_settings = settings.ServiceSettings()
     logging.basicConfig(
-        format='%(levelname)-8s | %(asctime)s | %(name)-25s | %(message)s',
-        level=tools.resolve_log_level(_service_settings.log_level)
+        format=_service_settings.log_format,
+        level=_service_settings.log_level.upper()
     )
-    # Log a startup message
-    logging.info(f'Starting the {_service_settings.name} service')
-    logging.debug('Reading the settings for the AMQP connection')
+    logging.info('Starting the "%s" service as PID: %s', _service_settings.name, os.getpid())
+    # = Read the AMQP Settings and check the server connection =
     try:
-        _amqp_settings = AMQPSettings()
-    except pydantic.ValidationError as error:
-        logging.error('The settings for the AMQP connection could not be read')
+        _amqp_settings = settings.AMQPSettings()
+    except pydantic.error_wrappers.ValidationError as config_error:
+        logging.critical('Unable to read the settings for the connection to the message broker',
+                         exc_info=config_error)
         sys.exit(1)
-    logging.debug('Reading the settings for the Service Registry connection')
-    try:
-        _registry_settings = ServiceRegistrySettings()
-    except pydantic.ValidationError as error:
-        logging.error('The settings for the Service Registry could not be read')
-        sys.exit(2)
-    
-    # Get the current event loop
-    _loop = asyncio.get_event_loop()
-    # Check if the service registry is reachable
-    logging.info('Checking the communication to the service registry')
-    _registry_available = _loop.run_until_complete(
-        tools.is_host_available(
-            host=_registry_settings.host,
-            port=_registry_settings.port
-        )
-    )
-    if not _registry_available:
-        logging.critical(
-            'The service registry is not reachable. The service may not be reachable via the '
-            'Gateway'
-        )
-        sys.exit(4)
-    else:
-        logging.info('SUCCESS: The service registry appears to be running')
-    # Check if the message broker is reachable
-    logging.info('Checking the communication to the message broker')
-    _message_broker_available = _loop.run_until_complete(
+    # Now check the connection to the message broker
+    logging.debug('Successfully read the settings for the message broker connection:\n%s',
+                  _amqp_settings.json(indent=2, by_alias=True))
+    # Set the port if it is None
+    _amqp_settings.dsn.port = 5672 if _amqp_settings.dsn.port is None else _amqp_settings.dsn.port
+    # Check the connectivity to the message broker
+    _message_broker_available = asyncio.run(
         tools.is_host_available(
             host=_amqp_settings.dsn.host,
-            port=5672 if _amqp_settings.dsn.port is None else int(_amqp_settings.dsn.port)
+            port=_amqp_settings.dsn.port
         )
     )
     if not _message_broker_available:
-        logging.critical(
-            'The message broker is not reachable. Since this is a security issue the service will '
-            'not start'
-        )
-        sys.exit(5)
-    else:
-        logging.info('SUCCESS: The message registry appears to be running')
-    
-    logging.info('Creating a new service registry client')
-    _eureka_client_options = {
-        'eureka_server':            f'http://{_registry_settings.host}:{_registry_settings.port}',
-        'app_name':                 _service_settings.name,
-        'instance_port':            65535,  # Port 65535 is used to signalize that the service is
-        # not usable via HTTP
-        'should_register':          True,
-        'should_discover':          False,
-        'renewal_interval_in_secs': 1,
-        'duration_in_secs':         5
-    }
-    logging.debug('Client Properties: %s', _eureka_client_options)
-    __service_registry_client = EurekaClient(**_eureka_client_options)
-    # Start the registry client
-    __service_registry_client.start()
-    __service_registry_client.status_update('STARTING')
-    # Set the status of this service to starting to disallow routing to them
-    try:
-        _amqp_server = ReconnectingAMQPConsumer()
-        _amqp_thread = Thread(
-            target=_amqp_server.start,
-            daemon=False
-        )
-        _amqp_thread.start()
-        __service_registry_client.status_update('UP')
-        signal.signal(signal.SIGTERM, signal_handler)
-        while True:
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        _amqp_server.stop()
-        _amqp_thread.join()
-        __service_registry_client.stop()
+        logging.critical('The specified message broker (Host: %s | Port: %s) is not reachable',
+                         _amqp_settings.dsn.host, _amqp_settings.dsn.port)
+        sys.exit(1)
+    logging.info('Passed all pre-startup checks and all dependent services are reachable')
+    logging.info('Starting the AMQP Server')
+    amqp_server = amqp_rpc_server.Server(
+        amqp_dsn=_amqp_settings.dsn,
+        exchange_name=_amqp_settings.exchange_name,
+        content_validator=server_functions.content_validator,
+        executor=server_functions.executor,
+        max_reconnection_attempts=1
+    )
+    # Attach the signal handler
+    signal.signal(signal.SIGTERM, signal_handler)
+    # Start the server
+    amqp_server.start_server()
+    while not _stop_event.is_set():
+        try:
+            amqp_server.raise_exceptions()
+            time.sleep(0.1)
+        except KeyboardInterrupt:
+            logging.info('Detected a KeyboardInterrupt. Stopping the AMQP server')
+            _stop_event.set()
+        except amqp_rpc_server.exceptions.MaxConnectionAttemptsReached:
+            sys.exit(1)
+    amqp_server.stop_server()
+    logging.info('Stopped the AMQP Server. Exiting the service')
