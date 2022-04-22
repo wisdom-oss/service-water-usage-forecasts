@@ -3,6 +3,11 @@ import asyncio
 import logging
 import time
 
+from sqlalchemy import select
+
+import database
+import database.tables
+
 
 def resolve_log_level(level: str) -> int:
     """Resolve the logging level from a string
@@ -37,3 +42,21 @@ async def is_host_available(host: str, port: int, timeout: int = 10) -> bool:
             # Since the connection could not be opened wait 5 seconds before trying again
             await asyncio.sleep(5)
     return False
+
+
+def get_consumer_group_name_from_id(consumer_group_id):
+    consumer_group_name_query = select(
+        [database.tables.consumer_groups.c.name],
+        database.tables.consumer_groups.c.id == consumer_group_id,
+    )
+    result = database.engine.execute(consumer_group_name_query).first()
+    return result[0]
+
+
+def get_municipal_name_from_id(municipal_id):
+    municipal_name_query = select(
+        [database.tables.municipals.c.name],
+        database.tables.municipals.c.id  == municipal_id,
+    )
+    result = database.engine.execute(municipal_name_query).first()
+    return result[0]

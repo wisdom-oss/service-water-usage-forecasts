@@ -10,8 +10,8 @@ class ForecastModel(str, enum.Enum):
 
 
 class ForecastGranularity(str, enum.Enum):
-    MUNICIPAL = "municipal"
-    DISTRICT = "district"
+    MUNICIPAL = "municipalities"
+    DISTRICT = "districts"
 
 
 class ErrorReasons(tuple, enum.Enum):

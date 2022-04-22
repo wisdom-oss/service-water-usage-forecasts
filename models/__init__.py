@@ -136,6 +136,11 @@ class ForecastResult(BaseModel):
     reference_usages: UsageData = pydantic.Field(default=..., alias="referenceUsages")
     """The usage values on which the model has been built"""
 
+    municipal: str = pydantic.Field(default=..., alias='name')
+    """The name of the municipal for which the forecast is valid"""
+
+    consumer_group: str = pydantic.Field(default=..., alias='consumerGroup')
+
 
 class ErrorResponse(BaseModel):
 
