@@ -34,11 +34,12 @@ def executor(message: bytes) -> bytes:
     """Parse the message and run the appropriate actions"""
     request: models.ForecastQuery = models.ForecastQuery.parse_raw(message)
     # %% Get the municipals which are within the districts
+    municipal_ids = {}
     if request.granularity == enums.ForecastGranularity.DISTRICT:
         municipals = []
         for obj in request.objects:
             municipal_query = select(
-                [database.tables.municipals.c.name],
+                [database.tables.municipals.c.id, database.tables.municipals.c.name],
                 func.ST_Within(
                     database.tables.municipals.c.geom,
                     select(database.tables.districts.c.geom).where(
@@ -48,7 +49,7 @@ def executor(message: bytes) -> bytes:
             )
             results = database.engine.execute(municipal_query)
             for municipal_tuple in results:
-                municipals.append(municipal_tuple[0])
+                municipals.append(municipal_tuple[1])
         request.objects = municipals
     # %% Convert the municipals into ids
     municipal_id_query = select(
@@ -111,6 +112,8 @@ def executor(message: bytes) -> bytes:
                 )
         tpe.map(lambda args: functions.run_forecast(**args), forecast_parameters)
     responses = []
+    municipals = tools.get_municipal_names_from_query(municipal_ids)
+    consumer_groups = tools.get_consumer_group_names_from_query(consumer_group_ids)
     for result in forecast_results:
         responses.append(
             models.ForecastResult(
@@ -127,9 +130,8 @@ def executor(message: bytes) -> bytes:
                     end=result.get("referenceValuesStart") + len(result.get("referenceUsages")) - 1,
                     usages=result.get("referenceUsages")
                 ),
-                municipal=tools.get_municipal_name_from_id(result.get('municipalID')),
-                consumer_group=tools.get_consumer_group_name_from_id(result.get('consumerGroupID'))
+                municipal=municipals[result.get('municipalID')],
+                consumer_group=consumer_groups[result.get('consumerGroupID')]
             ).dict(by_alias=True)
         )
     return json.dumps(responses).encode('utf-8')
-    # return municipal_usage_data

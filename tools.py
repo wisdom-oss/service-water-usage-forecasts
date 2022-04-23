@@ -44,19 +44,25 @@ async def is_host_available(host: str, port: int, timeout: int = 10) -> bool:
     return False
 
 
-def get_consumer_group_name_from_id(consumer_group_id):
-    consumer_group_name_query = select(
-        [database.tables.consumer_groups.c.name],
-        database.tables.consumer_groups.c.id == consumer_group_id,
-    )
-    result = database.engine.execute(consumer_group_name_query).first()
-    return result[0]
-
-
-def get_municipal_name_from_id(municipal_id):
+def get_municipal_names_from_query(municipal_ids):
     municipal_name_query = select(
-        [database.tables.municipals.c.name],
-        database.tables.municipals.c.id  == municipal_id,
+        [database.tables.municipals.c.id, database.tables.municipals.c.name],
+        database.tables.municipals.c.id.in_(municipal_ids),
     )
-    result = database.engine.execute(municipal_name_query).first()
-    return result[0]
+    result = database.engine.execute(municipal_name_query).all()
+    mapping = {}
+    for row in result:
+        mapping.update({row[0]: row[1]})
+    return mapping
+
+
+def get_consumer_group_names_from_query(consumer_group_ids):
+    consumer_group_parameter_query = select(
+        [database.tables.consumer_groups.c.id, database.tables.consumer_groups.c.parameter],
+        database.tables.consumer_groups.c.id.in_(consumer_group_ids),
+    )
+    result = database.engine.execute(consumer_group_parameter_query).all()
+    mapping = {}
+    for row in result:
+        mapping.update({row[0]: row[1]})
+    return mapping
