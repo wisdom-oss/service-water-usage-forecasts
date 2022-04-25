@@ -1,14 +1,15 @@
 """Module containing functions for the AMQP server"""
-import json
-import logging
-import time
 import concurrent.futures
+import ujson
+import logging
+import multiprocessing
 
 import pandas
 import pydantic.error_wrappers
 import sqlalchemy
 from sqlalchemy.sql import *
 from sqlalchemy.sql.functions import sum as sum_
+
 import database
 import database.tables
 import enums
@@ -85,7 +86,7 @@ def executor(message: bytes) -> bytes:
     usage_data = pandas.DataFrame(data_query_results)
     municipal_usage_data = dict(tuple(usage_data.groupby("municipal")))
     forecast_results = []
-    with concurrent.futures.ThreadPoolExecutor(thread_name_prefix="CALC") as tpe:
+    with concurrent.futures.ThreadPoolExecutor() as calc_tpe:
         forecast_parameters = []
         for municipal, data in municipal_usage_data.items():
             for consumer_group, data in dict(tuple(data.groupby("consumer_group"))).items():
@@ -110,28 +111,12 @@ def executor(message: bytes) -> bytes:
                         "municipal": municipal,
                     }
                 )
-        tpe.map(lambda args: functions.run_forecast(**args), forecast_parameters)
+        calc_tpe.map(lambda args: functions.run_forecast(**args), forecast_parameters)
     responses = []
     municipals = tools.get_municipal_names_from_query(municipal_ids)
     consumer_groups = tools.get_consumer_group_names_from_query(consumer_group_ids)
-    for result in forecast_results:
-        responses.append(
-            models.ForecastResult(
-                model=result.get('forecastType'),
-                equation=result.get('forecastEquation'),
-                score=result.get('forecastScore'),
-                forecasted_usages=models.UsageData(
-                    start=result.get('forecastValuesStart'),
-                    end=result.get("forecastValuesStart") + request.forecast_size - 1,
-                    usages=result.get("forecastedUsages")
-                ),
-                reference_usages=models.UsageData(
-                    start=result.get('referenceValuesStart'),
-                    end=result.get("referenceValuesStart") + len(result.get("referenceUsages")) - 1,
-                    usages=result.get("referenceUsages")
-                ),
-                municipal=municipals[result.get('municipalID')],
-                consumer_group=consumer_groups[result.get('consumerGroupID')]
-            ).dict(by_alias=True)
+    with concurrent.futures.ThreadPoolExecutor() as responses_tpe:
+        responses_tpe.map(lambda forecast_result: functions.build_response(
+            responses, request, municipals, consumer_groups, forecast_result), forecast_results
         )
-    return json.dumps(responses).encode('utf-8')
+    return ujson.dumps(responses, ensure_ascii=False).encode('utf-8')

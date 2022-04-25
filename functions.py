@@ -5,6 +5,7 @@ import logging
 import sklearn.metrics
 
 import enums
+import models
 
 
 def run_forecast(**kwargs):
@@ -84,3 +85,25 @@ def _run_forecast(
         result_list.append(forecast_result)
     else:
         raise ValueError("The supplied forecast model is not allowed")
+
+
+def build_response(responses, request, municipals, consumer_groups, forecast_result):
+    responses.append(
+        models.ForecastResult(
+            model=forecast_result.get('forecastType'),
+            equation=forecast_result.get('forecastEquation'),
+            score=forecast_result.get('forecastScore'),
+            forecasted_usages=models.UsageData(
+                start=forecast_result.get('forecastValuesStart'),
+                end=forecast_result.get("forecastValuesStart") + request.forecast_size - 1,
+                usages=forecast_result.get("forecastedUsages")
+            ),
+            reference_usages=models.UsageData(
+                start=forecast_result.get('referenceValuesStart'),
+                end=forecast_result.get("referenceValuesStart") + len(forecast_result.get("referenceUsages")) - 1,
+                usages=forecast_result.get("referenceUsages")
+            ),
+            municipal=municipals[forecast_result.get('municipalID')],
+            consumer_group=consumer_groups[forecast_result.get('consumerGroupID')]
+        ).dict(by_alias=True)
+    )
