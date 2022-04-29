@@ -27,7 +27,7 @@ class ForecastQuery(BaseModel):
     model: enums.ForecastModel = pydantic.Field(default=..., alias="model")
     """The forecast model which shall be used to forecast the usage values"""
 
-    objects: list[str] | list[int] = pydantic.Field(default=..., alias="objects")
+    objects: list[typing.Union[str, int]] = pydantic.Field(default=..., alias="objects")
     """The names of the geo objects for which the query shall be executed"""
 
     consumer_groups: typing.Optional[list[str]] = pydantic.Field(
