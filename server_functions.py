@@ -1,12 +1,12 @@
 """Module containing functions for the AMQP server"""
 import concurrent.futures
-import ujson
 import logging
-import multiprocessing
+import time
 
 import pandas
 import pydantic.error_wrappers
 import sqlalchemy
+import ujson
 from sqlalchemy.sql import *
 from sqlalchemy.sql.functions import sum as sum_
 
@@ -86,7 +86,10 @@ def executor(message: bytes) -> bytes:
     usage_data = pandas.DataFrame(data_query_results)
     municipal_usage_data = dict(tuple(usage_data.groupby("municipal")))
     forecast_results = []
-    with concurrent.futures.ThreadPoolExecutor() as calc_tpe:
+    single_forecast_responses = []
+    municipals = tools.get_municipal_names_from_query(municipal_ids)
+    consumer_groups = tools.get_consumer_group_names_from_query(consumer_group_ids)
+    with concurrent.futures.ThreadPoolExecutor() as tpe:
         forecast_parameters = []
         for municipal, data in municipal_usage_data.items():
             for consumer_group, data in dict(tuple(data.groupby("consumer_group"))).items():
@@ -95,7 +98,7 @@ def executor(message: bytes) -> bytes:
                 data: pandas.DataFrame
                 data = data.sort_values(["year"])
                 for v in data["sum_1"]:
-                    usages.append(float(v))
+                    usages.append(v)
                 for v in data["year"]:
                     years.append(int(v))
                 years = sorted(years)
@@ -111,12 +114,23 @@ def executor(message: bytes) -> bytes:
                         "municipal": municipal,
                     }
                 )
-        calc_tpe.map(lambda args: functions.run_forecast(**args), forecast_parameters)
-    responses = []
-    municipals = tools.get_municipal_names_from_query(municipal_ids)
-    consumer_groups = tools.get_consumer_group_names_from_query(consumer_group_ids)
-    with concurrent.futures.ThreadPoolExecutor() as responses_tpe:
-        responses_tpe.map(lambda forecast_result: functions.build_response(
-            responses, request, municipals, consumer_groups, forecast_result), forecast_results
-        )
-    return ujson.dumps(responses, ensure_ascii=False).encode('utf-8')
+        calc_threads = tpe.map(lambda args: functions.run_forecast(**args), forecast_parameters)
+        while len(forecast_results) < len(forecast_parameters):
+            time.sleep(0.05)
+        response_builder_threads = tpe.map(lambda forecast_result: functions.build_response(
+            single_forecast_responses, request, municipals, consumer_groups, forecast_result),
+                                           forecast_results
+                                           )
+        while len(single_forecast_responses) < len(forecast_parameters):
+            time.sleep(0.05)
+    # %% Accumulate the forecasted data into municipals and consumer groups
+    functions.accumulate_by_municipals(single_forecast_responses)
+    response = {
+        "partials": single_forecast_responses,
+        "accumulations": {
+            "city": functions.accumulate_by_municipals(single_forecast_responses),
+            "consumerGroup": functions.accumulate_by_consumer_groups(single_forecast_responses)
+        }
+    }
+    print(ujson.dumps(response, ensure_ascii=False, indent=2))
+    return ujson.dumps(response, ensure_ascii=False).encode('utf-8')
