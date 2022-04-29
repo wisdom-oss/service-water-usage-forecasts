@@ -38,25 +38,20 @@ def executor(message: bytes) -> bytes:
     municipal_ids = {}
     if request.granularity == enums.ForecastGranularity.DISTRICT:
         municipals = []
-        for obj in request.objects:
+        for key in request.keys:
             municipal_query = select(
                 [database.tables.municipals.c.id, database.tables.municipals.c.name],
-                func.ST_Within(
-                    database.tables.municipals.c.geom,
-                    select(database.tables.districts.c.geom).where(
-                        database.tables.districts.c.name == obj
-                    ),
-                ),
+                database.tables.municipals.c.key.startswith(key)
             )
             results = database.engine.execute(municipal_query)
             for municipal_tuple in results:
                 municipals.append(municipal_tuple[1])
-        request.objects = municipals
+        request.keys = municipals
     # %% Convert the municipals into ids
-    municipal_id_query = select(
-        [database.tables.municipals.c.id], database.tables.municipals.c.name.in_(request.objects)
+    municipal_key_query = select(
+        [database.tables.municipals.c.id], database.tables.municipals.c.name.in_(request.keys)
     )
-    results = database.engine.execute(municipal_id_query).all()
+    results = database.engine.execute(municipal_key_query).all()
     municipal_ids = [row[0] for row in results]
     # %% Convert the Consumer Groups into ids
     consumer_group_id_query = select(
