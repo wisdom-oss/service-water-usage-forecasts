@@ -14,7 +14,7 @@ usages = sqlalchemy.Table(
     sqlalchemy.Column("consumer", None, sqlalchemy.ForeignKey("consumers.id")),
     sqlalchemy.Column("consumer_group", None, sqlalchemy.ForeignKey("consumer_group.id")),
     sqlalchemy.Column("year", sqlalchemy.Integer),
-    sqlalchemy.Column("value", sqlalchemy.Numeric),
+    sqlalchemy.Column("value", sqlalchemy.Numeric(asdecimal=False)),
 )
 
 consumer_groups = sqlalchemy.Table(
