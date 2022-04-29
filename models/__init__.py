@@ -27,8 +27,8 @@ class ForecastQuery(BaseModel):
     model: enums.ForecastModel = pydantic.Field(default=..., alias="model")
     """The forecast model which shall be used to forecast the usage values"""
 
-    objects: list[typing.Union[str, int]] = pydantic.Field(default=..., alias="objects")
-    """The names of the geo objects for which the query shall be executed"""
+    keys: list[typing.Union[str, int]] = pydantic.Field(default=..., alias="keys")
+    """The AGS keys of the geo objects for which the query shall be executed"""
 
     consumer_groups: typing.Optional[list[str]] = pydantic.Field(
         default=None, alias="consumerGroups"
@@ -38,27 +38,29 @@ class ForecastQuery(BaseModel):
     forecast_size: int = pydantic.Field(default=20, alias="forecastSize", gt=0)
     """The amount of years for which the forecast shall be calculated"""
 
-    @pydantic.validator("objects")
+    @pydantic.validator("keys")
     def check_object_existence(cls, v, values):
         granularity = values.get("granularity")
         if granularity == enums.ForecastGranularity.DISTRICT:
             district_query = sql.select(
-                [database.tables.districts.c.name], database.tables.districts.c.name.in_(v)
+                [database.tables.districts.c.key], database.tables.districts.c.key.in_(v)
             )
             results = database.engine.execute(district_query).all()
             found_objects = [row[0] for row in results]
             for obj in v:
                 if obj not in found_objects:
-                    raise ValueError(f"The district {obj} was not found in the database")
+                    raise ValueError(f"The district with the key {obj} was not found in the "
+                                     f"database")
         elif granularity == enums.ForecastGranularity.MUNICIPAL:
             municipal_query = sql.select(
-                [database.tables.municipals.c.name], database.tables.municipals.c.name.in_(v)
+                [database.tables.municipals.c.name], database.tables.municipals.c.key.in_(v)
             )
             results = database.engine.execute(municipal_query).all()
             found_objects = [row[0] for row in results]
             for obj in v:
                 if obj not in found_objects:
-                    raise ValueError(f"The municipal {obj} was not found in the database")
+                    raise ValueError(f"The municipal with the key {obj} was not found in the "
+                                     f"database")
         return v
 
     @pydantic.validator("consumer_groups", always=True)
