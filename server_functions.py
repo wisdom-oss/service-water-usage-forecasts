@@ -119,7 +119,6 @@ def executor(message: bytes) -> bytes:
         while len(single_forecast_responses) < len(forecast_parameters):
             time.sleep(0.05)
     # %% Accumulate the forecasted data into municipals and consumer groups
-    functions.accumulate_by_municipals(single_forecast_responses)
     response = {
         "partials": single_forecast_responses,
         "accumulations": {
