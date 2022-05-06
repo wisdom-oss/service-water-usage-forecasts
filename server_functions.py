@@ -35,23 +35,21 @@ def executor(message: bytes) -> bytes:
     """Parse the message and run the appropriate actions"""
     request: models.ForecastQuery = models.ForecastQuery.parse_raw(message)
     # %% Get the municipals which are within the districts
-    municipal_ids = {}
-    if request.granularity == enums.ForecastGranularity.DISTRICT:
-        municipals = []
-        for key in request.keys:
-            municipal_query = select(
-                [database.tables.municipals.c.id, database.tables.municipals.c.name],
-                database.tables.municipals.c.key.startswith(key)
-            )
-            results = database.engine.execute(municipal_query)
-            for municipal_tuple in results:
-                municipals.append(municipal_tuple[1])
-        request.keys = municipals
-    # %% Convert the municipals into ids
-    municipal_key_query = select(
-        [database.tables.municipals.c.id], database.tables.municipals.c.name.in_(request.keys)
+    municipal_keys = [k for k in request.keys if len(k) == 8]
+    district_keys = [k for k in request.keys if len(k) == 5]
+    # %% Get the municipals within a district
+    for key in district_keys:
+        municipal_query = select(
+            [database.tables.municipals.c.key], database.tables.municipals.c.key.startswith(key)
+        )
+        results = database.engine.execute(municipal_query)
+        municipal_keys += [res[0] for res in results]
+    # %% Get the primary keys for the municipals
+    municipal_keys = list(set(municipal_keys))
+    municipal_id_query = select(
+        [database.tables.municipals.c.id], database.tables.municipals.c.key.in_(municipal_keys)
     )
-    results = database.engine.execute(municipal_key_query).all()
+    results = database.engine.execute(municipal_id_query).all()
     municipal_ids = [row[0] for row in results]
     # %% Convert the Consumer Groups into ids
     consumer_group_id_query = select(
@@ -112,19 +110,20 @@ def executor(message: bytes) -> bytes:
         calc_threads = tpe.map(lambda args: functions.run_forecast(**args), forecast_parameters)
         while len(forecast_results) < len(forecast_parameters):
             time.sleep(0.05)
-        response_builder_threads = tpe.map(lambda forecast_result: functions.build_response(
-            single_forecast_responses, request, municipals, consumer_groups, forecast_result),
-                                           forecast_results
-                                           )
+        response_builder_threads = tpe.map(
+            lambda forecast_result: functions.build_response(
+                single_forecast_responses, request, municipals, consumer_groups, forecast_result
+            ),
+            forecast_results,
+        )
         while len(single_forecast_responses) < len(forecast_parameters):
             time.sleep(0.05)
     # %% Accumulate the forecasted data into municipals and consumer groups
     response = {
         "partials": single_forecast_responses,
         "accumulations": {
-            "city": functions.accumulate_by_municipals(single_forecast_responses),
-            "consumerGroup": functions.accumulate_by_consumer_groups(single_forecast_responses)
-        }
+            "municipal": functions.accumulate_by_municipals(single_forecast_responses),
+            "consumerGroup": functions.accumulate_by_consumer_groups(single_forecast_responses),
+        },
     }
-    print(ujson.dumps(response, ensure_ascii=False, indent=2))
-    return ujson.dumps(response, ensure_ascii=False).encode('utf-8')
+    return ujson.dumps(response, ensure_ascii=False, sort_keys=True).encode("utf-8")
