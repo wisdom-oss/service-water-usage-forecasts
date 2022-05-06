@@ -46,23 +46,31 @@ async def is_host_available(host: str, port: int, timeout: int = 10) -> bool:
 
 def get_municipal_names_from_query(municipal_ids):
     municipal_name_query = select(
-        [database.tables.municipals.c.id, database.tables.municipals.c.name],
+        [
+            database.tables.municipals.c.id,
+            database.tables.municipals.c.name,
+            database.tables.municipals.c.key,
+        ],
         database.tables.municipals.c.id.in_(municipal_ids),
     )
     result = database.engine.execute(municipal_name_query).all()
     mapping = {}
     for row in result:
-        mapping.update({row[0]: row[1]})
+        mapping.update({row[0]: (row[1], row[2])})
     return mapping
 
 
 def get_consumer_group_names_from_query(consumer_group_ids):
     consumer_group_parameter_query = select(
-        [database.tables.consumer_groups.c.id, database.tables.consumer_groups.c.parameter],
+        [
+            database.tables.consumer_groups.c.id,
+            database.tables.consumer_groups.c.parameter,
+            database.tables.consumer_groups.c.name,
+        ],
         database.tables.consumer_groups.c.id.in_(consumer_group_ids),
     )
     result = database.engine.execute(consumer_group_parameter_query).all()
     mapping = {}
     for row in result:
-        mapping.update({row[0]: row[1]})
+        mapping.update({row[0]: (row[1], row[2])})
     return mapping

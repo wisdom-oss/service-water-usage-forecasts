@@ -21,14 +21,11 @@ class BaseModel(pydantic.BaseModel):
 class ForecastQuery(BaseModel):
     """A model describing, how the incoming request shall look like"""
 
-    granularity: enums.ForecastGranularity = pydantic.Field(default=..., alias="granularity")
-    """The level of granularity from which the object names are originating"""
-
     model: enums.ForecastModel = pydantic.Field(default=..., alias="model")
     """The forecast model which shall be used to forecast the usage values"""
 
-    objects: list[typing.Union[str, int]] = pydantic.Field(default=..., alias="objects")
-    """The names of the geo objects for which the query shall be executed"""
+    keys: list[str] = pydantic.Field(default=..., alias="keys")
+    """The municipal and district keys for which objects the forecast shall be executed"""
 
     consumer_groups: typing.Optional[list[str]] = pydantic.Field(
         default=None, alias="consumerGroups"
@@ -38,27 +35,42 @@ class ForecastQuery(BaseModel):
     forecast_size: int = pydantic.Field(default=20, alias="forecastSize", gt=0)
     """The amount of years for which the forecast shall be calculated"""
 
-    @pydantic.validator("objects")
-    def check_object_existence(cls, v, values):
-        granularity = values.get("granularity")
-        if granularity == enums.ForecastGranularity.DISTRICT:
-            district_query = sql.select(
-                [database.tables.districts.c.name], database.tables.districts.c.name.in_(v)
+    @pydantic.validator("keys")
+    def check_keys(cls, v):
+        """
+        Check if the keys are of a valid length and are present in the database
+
+        :param v: The values which are already present in the database
+        :return: The object containing the keys
+        """
+        if v is None:
+            raise ValueError("At least one key needs to be present in the list of keys")
+        # Split the keys into a district and a municipal list
+        municipal_keys = [k for k in v if len(k) == 8]
+        district_keys = [k for k in v if len(k) == 5]
+        unknown_keys = [k for k in v if len(k) not in [5, 8]]
+        # Now check if any unknown keys have been sent
+        if len(unknown_keys) > 0:
+            raise ValueError(
+                f"The following keys have not been recognized by the module: {unknown_keys}"
             )
-            results = database.engine.execute(district_query).all()
-            found_objects = [row[0] for row in results]
-            for obj in v:
-                if obj not in found_objects:
-                    raise ValueError(f"The district {obj} was not found in the database")
-        elif granularity == enums.ForecastGranularity.MUNICIPAL:
-            municipal_query = sql.select(
-                [database.tables.municipals.c.name], database.tables.municipals.c.name.in_(v)
+        # Now check if the keys are present in the database
+        municipal_query = sql.select(
+            [database.tables.municipals.c.key],
+            database.tables.municipals.c.key.in_(municipal_keys),
+        )
+        db_municipals = database.engine.execute(municipal_query).all()
+        unrecognized_keys = [k for k in municipal_keys if (k,) not in db_municipals]
+        district_keys_query = sql.select(
+            [database.tables.districts.c.key],
+            database.tables.districts.c.key.in_(district_keys),
+        )
+        db_districts = database.engine.execute(district_keys_query).all()
+        unrecognized_keys += [k for k in district_keys if (k,) not in db_districts]
+        if len(unrecognized_keys) > 0:
+            raise ValueError(
+                f"The following keys have not been recognized by the module: {unrecognized_keys}"
             )
-            results = database.engine.execute(municipal_query).all()
-            found_objects = [row[0] for row in results]
-            for obj in v:
-                if obj not in found_objects:
-                    raise ValueError(f"The municipal {obj} was not found in the database")
         return v
 
     @pydantic.validator("consumer_groups", always=True)
@@ -80,14 +92,14 @@ class ForecastQuery(BaseModel):
             return v
 
 
-class UsageData(BaseModel):
-    start: int = pydantic.Field(default=..., alias="startYear")
+class Usages(BaseModel):
+    start: int = pydantic.Field(default=..., alias="start")
     """The year from which on the data is contained in the ``usages`` property"""
 
-    end: int = pydantic.Field(default=..., alias="endYear")
+    end: int = pydantic.Field(default=..., alias="end")
     """The year in which the data in the ``usages`` property ends"""
 
-    usages: list[float] = pydantic.Field(default=..., alias="usageAmounts")
+    amounts: list[float] = pydantic.Field(default=..., alias="amounts")
     """The usage amounts from each year, ordered in a ascending manner"""
 
     @pydantic.root_validator
@@ -109,7 +121,7 @@ class UsageData(BaseModel):
         """
         data_start = values.get("start")
         data_end = values.get("end")
-        usage_data = values.get("usages")
+        usage_data = values.get("amounts")
         expected_list_length = (data_end - data_start) + 1
         if len(usage_data) == expected_list_length:
             return values
@@ -119,27 +131,50 @@ class UsageData(BaseModel):
         )
 
 
-class ForecastResult(BaseModel):
+class Municipal(BaseModel):
 
-    model: enums.ForecastModel = pydantic.Field(default=..., alias="forecastType")
-    """The model used to create the forecasted values"""
+    key: str = pydantic.Field(default=..., alias="key")
+    """The official municipal key of a municipal"""
 
-    equation: str = pydantic.Field(default=..., alias="forecastEquation")
-    """The equation which has been used to calculate the forecasted values"""
+    name: str = pydantic.Field(default=..., alias="name")
+    """The name of the municipal"""
 
-    score: str = pydantic.Field(default=..., alias="forecastScore")
+
+class ConsumerGroup(BaseModel):
+
+    key: str = pydantic.Field(default=..., alias="key")
+    """The official municipal key of a municipal"""
+
+    name: str = pydantic.Field(default=..., alias="name")
+    """The name of the municipal"""
+
+
+class Forecast(BaseModel):
+
+    model: enums.ForecastModel = pydantic.Field(default=..., alias="model")
+    """The model used to fit a curve to the reference values"""
+
+    equation: str = pydantic.Field(default=..., alias="equation")
+    """The equation fitted to the reference values used to the forecasted values"""
+
+    score: float = pydantic.Field(default=..., alias="float")
     """The R² score of the forecast"""
 
-    forecasted_usages: UsageData = pydantic.Field(default=..., alias="forecastedUsages")
+    usages: Usages = pydantic.Field(default=..., alias="usages")
+
+
+class ForecastResult(BaseModel):
+
+    forecast: Forecast = pydantic.Field(default=..., alias="forecast")
     """The usage values that have been forecasted"""
 
-    reference_usages: UsageData = pydantic.Field(default=..., alias="referenceUsages")
+    reference_usages: Usages = pydantic.Field(default=..., alias="referenceUsages")
     """The usage values on which the model has been built"""
 
-    municipal: str = pydantic.Field(default=..., alias='name')
-    """The name of the municipal for which the forecast is valid"""
+    municipal: Municipal = pydantic.Field(default=..., alias="municipal")
 
-    consumer_group: str = pydantic.Field(default=..., alias='consumerGroup')
+    consumer_group: ConsumerGroup = pydantic.Field(default=..., alias="consumerGroup")
+    """The parameter of the consumer group"""
 
 
 class ErrorResponse(BaseModel):
