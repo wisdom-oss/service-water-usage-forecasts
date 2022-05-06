@@ -1,135 +1,129 @@
 """Module containing functions for the AMQP server"""
-import json
+import concurrent.futures
 import logging
-import typing
+import time
 
-import numpy.polynomial
+import pandas
 import pydantic.error_wrappers
-import numpy as np
-import sklearn.linear_model
+import sqlalchemy
+import ujson
+from sqlalchemy.sql import *
+from sqlalchemy.sql.functions import sum as sum_
 
+import database
+import database.tables
 import enums
-import models.requests
-import models.responses
-import models.shared
+import functions
+import models
+import tools
 
-_validator_logger = logging.getLogger('content_validator')
-_executor_logger = logging.getLogger('executor')
+_validator_logger = logging.getLogger("content_validator")
+_executor_logger = logging.getLogger("executor")
 
 
 def content_validator(message: bytes) -> bool:
     """Check if the content is parseable by the pydantic data model"""
     try:
-        models.requests.ForecastRequest.parse_raw(message)
+        models.ForecastQuery.parse_raw(message)
         return True
     except pydantic.error_wrappers.ValidationError as e:
-        _validator_logger.critical('Unable to parse message. Rejecting the message', exc_info=e)
+        _validator_logger.critical("Unable to parse message. Rejecting the message", exc_info=e)
         return False
 
 
 def executor(message: bytes) -> bytes:
     """Parse the message and run the appropriate actions"""
-    request = models.requests.ForecastRequest.parse_raw(message)
-    # Create a range of values for the x-Axis
-    x_axis = np.arange(
-        start=request.usage_data.start,
-        stop=request.usage_data.end + 1
+    request: models.ForecastQuery = models.ForecastQuery.parse_raw(message)
+    # %% Get the municipals which are within the districts
+    municipal_keys = [k for k in request.keys if len(k) == 8]
+    district_keys = [k for k in request.keys if len(k) == 5]
+    # %% Get the municipals within a district
+    for key in district_keys:
+        municipal_query = select(
+            [database.tables.municipals.c.key], database.tables.municipals.c.key.startswith(key)
+        )
+        results = database.engine.execute(municipal_query)
+        municipal_keys += [res[0] for res in results]
+    # %% Get the primary keys for the municipals
+    municipal_keys = list(set(municipal_keys))
+    municipal_id_query = select(
+        [database.tables.municipals.c.id], database.tables.municipals.c.key.in_(municipal_keys)
     )
-    # Create a range of x-Axis values for the prediction
-    prediction_x_axis = np.arange(
-        start=request.usage_data.start,
-        stop=request.usage_data.end + 1 + request.predicted_years
+    results = database.engine.execute(municipal_id_query).all()
+    municipal_ids = [row[0] for row in results]
+    # %% Convert the Consumer Groups into ids
+    consumer_group_id_query = select(
+        [database.tables.consumer_groups.c.id],
+        database.tables.consumer_groups.c.parameter.in_(request.consumer_groups),
     )
-    # Create the y-Axis values from the usage amounts
-    y_axis = np.array(request.usage_data.usages)
-    # Create an empty forecast_result
-    forecast_result: typing.Optional[dict] = None
-    # Now switch between the different regression models
-    if request.type == enums.ForecastType.LINEAR:
-        _executor_logger.debug('Running a linear forecast of the dataset')
-        # Fit the given values to a polynom in the first degree
-        curve = numpy.polynomial.Polynomial.fit(x_axis, y_axis, 1)
-        # Now forecast all values
-        values = curve(prediction_x_axis).tolist()
-        # Now get the forecasted values by slicing just after the y-axis ends
-        forecasted_values = values[len(y_axis):]
-        # Now get the reference values for the r² calculation
-        predicted_current_values = values[:len(x_axis)]
-        # Now calculate the r² value
-        forecast_r2 = sklearn.metrics.r2_score(y_axis, predicted_current_values)
-        # Now build the equation for the forecast model
-        equation = str(curve)
-        # Now pre-build the response object
-        forecasted_usages = models.shared.WaterUsages(
-            start=request.usage_data.end + 1,
-            end=request.usage_data.end + request.predicted_years,
-            usages=forecasted_values
+    cg_results = database.engine.execute(consumer_group_id_query).all()
+    consumer_group_ids = [row[0] for row in cg_results]
+    # %% Get the water usage data for every municipal and consumer group
+    data_query = select(
+        [
+            database.tables.usages.c.municipal,
+            database.tables.usages.c.consumer_group,
+            database.tables.usages.c.year,
+            sum_(database.tables.usages.c.value),
+        ],
+        sqlalchemy.and_(
+            database.tables.usages.c.municipal.in_(municipal_ids),
+            database.tables.usages.c.consumer_group.in_(consumer_group_ids),
+        ),
+    ).group_by(
+        database.tables.usages.c.municipal,
+        database.tables.usages.c.consumer_group,
+        database.tables.usages.c.year,
+    )
+    data_query_results = database.engine.execute(data_query).all()
+    usage_data = pandas.DataFrame(data_query_results)
+    municipal_usage_data = dict(tuple(usage_data.groupby("municipal")))
+    forecast_results = []
+    single_forecast_responses = []
+    municipals = tools.get_municipal_names_from_query(municipal_ids)
+    consumer_groups = tools.get_consumer_group_names_from_query(consumer_group_ids)
+    with concurrent.futures.ThreadPoolExecutor() as tpe:
+        forecast_parameters = []
+        for municipal, data in municipal_usage_data.items():
+            for consumer_group, data in dict(tuple(data.groupby("consumer_group"))).items():
+                usages = []
+                years = []
+                data: pandas.DataFrame
+                data = data.sort_values(["year"])
+                for v in data["sum_1"]:
+                    usages.append(v)
+                for v in data["year"]:
+                    years.append(int(v))
+                years = sorted(years)
+                forecast_parameters.append(
+                    {
+                        "result_list": forecast_results,
+                        "consumer_group": consumer_group,
+                        "model": request.model,
+                        "usages": usages,
+                        "start_year": years[0],
+                        "end_year": years[-1],
+                        "forecast_size": request.forecast_size,
+                        "municipal": municipal,
+                    }
+                )
+        calc_threads = tpe.map(lambda args: functions.run_forecast(**args), forecast_parameters)
+        while len(forecast_results) < len(forecast_parameters):
+            time.sleep(0.05)
+        response_builder_threads = tpe.map(
+            lambda forecast_result: functions.build_response(
+                single_forecast_responses, request, municipals, consumer_groups, forecast_result
+            ),
+            forecast_results,
         )
-        forecast_result = {
-            'usage_data': forecasted_usages,
-            'equation':   equation,
-            'score':      forecast_r2
-        }
-    elif request.type == enums.ForecastType.POLYNOMIAL:
-        _executor_logger.debug('Running a linear forecast of the dataset')
-        # Fit the given values to a polynom in the first degree
-        curve = numpy.polynomial.Polynomial.fit(x_axis, y_axis, 2)
-        # Now forecast all values
-        values = curve(prediction_x_axis).tolist()
-        # Now get the forecasted values by slicing just after the y-axis ends
-        forecasted_values = values[len(y_axis):]
-        # Now get the reference values for the r² calculation
-        predicted_current_values = values[:len(x_axis)]
-        # Now calculate the r² value
-        forecast_r2 = sklearn.metrics.r2_score(y_axis, predicted_current_values)
-        # Now build the equation for the forecast model
-        equation = str(curve)
-        # Now pre-build the response object
-        forecasted_usages = models.shared.WaterUsages(
-            start=request.usage_data.end + 1,
-            end=request.usage_data.end + request.predicted_years,
-            usages=forecasted_values
-        )
-        forecast_result = {
-            'usage_data': forecasted_usages,
-            'equation':   equation,
-            'score':      forecast_r2
-        }
-    elif request.type == enums.ForecastType.LOGARITHMIC:
-        _executor_logger.debug('Running a linear forecast of the dataset')
-        # Fit the given values to a polynom in the first degree
-        curve = numpy.polynomial.Polynomial.fit(numpy.log(x_axis), y_axis, 1)
-        # Now forecast all values
-        values = curve(prediction_x_axis).tolist()
-        # Now get the forecasted values by slicing just after the y-axis ends
-        forecasted_values = values[len(y_axis):]
-        # Now get the reference values for the r² calculation
-        predicted_current_values = values[:len(x_axis)]
-        # Now calculate the r² value
-        forecast_r2 = sklearn.metrics.r2_score(y_axis, predicted_current_values)
-        # Now build the equation for the forecast model
-        equation = str(curve)
-        forecasted_usages = models.shared.WaterUsages(
-            start=request.usage_data.end + 1,
-            end=request.usage_data.end + request.predicted_years,
-            usages=forecasted_values
-        )
-        forecast_result = {
-            'usage_data': forecasted_usages,
-            'equation':   equation,
-            'score':      forecast_r2
-        }
-    if forecast_result is not None:
-        return models.responses.ForecastResponse(
-            type=request.type,
-            equation=forecast_result['equation'],
-            score=forecast_result['score'],
-            forecasted_usages=forecast_result['usage_data'],
-            reference_usages=request.usage_data
-        ).json(by_alias=True).encode('utf-8')
-    else:
-        return json.dumps(
-            {
-                "error": "forecast_model_not_available"
-            }
-        ).encode('utf-8')
+        while len(single_forecast_responses) < len(forecast_parameters):
+            time.sleep(0.05)
+    # %% Accumulate the forecasted data into municipals and consumer groups
+    response = {
+        "partials": single_forecast_responses,
+        "accumulations": {
+            "municipal": functions.accumulate_by_municipals(single_forecast_responses),
+            "consumerGroup": functions.accumulate_by_consumer_groups(single_forecast_responses),
+        },
+    }
+    return ujson.dumps(response, ensure_ascii=False, sort_keys=True).encode("utf-8")
