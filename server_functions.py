@@ -82,6 +82,8 @@ def executor(message: bytes) -> bytes:
     single_forecast_responses = []
     municipals = tools.get_municipal_names_from_query(municipal_ids)
     consumer_groups = tools.get_consumer_group_names_from_query(consumer_group_ids)
+    inverted_municipals = tools.get_inverted_municipal_mapping(municipals)
+    inverted_consumer_groups = tools.get_inverted_consumer_group_mapping(consumer_groups)
     with concurrent.futures.ThreadPoolExecutor() as tpe:
         forecast_parameters = []
         for municipal, data in municipal_usage_data.items():
@@ -122,8 +124,12 @@ def executor(message: bytes) -> bytes:
     response = {
         "partials": single_forecast_responses,
         "accumulations": {
-            "municipal": functions.accumulate_by_municipals(single_forecast_responses),
-            "consumerGroup": functions.accumulate_by_consumer_groups(single_forecast_responses),
+            "municipal": functions.accumulate_by_municipals(
+                single_forecast_responses, inverted_municipals
+            ),
+            "consumerGroup": functions.accumulate_by_consumer_groups(
+                single_forecast_responses, inverted_consumer_groups
+            ),
         },
     }
     return ujson.dumps(response, ensure_ascii=False, sort_keys=True).encode("utf-8")

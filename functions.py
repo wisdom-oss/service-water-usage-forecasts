@@ -7,6 +7,7 @@ import sklearn.metrics
 
 import enums
 import models
+import tools
 
 
 def run_forecast(**kwargs):
@@ -102,8 +103,8 @@ def build_response(responses, request, municipals, consumer_groups, forecast_res
         ),
     )
     municipal = models.Municipal(
-        key=municipals[forecast_result.get("municipalID")][0],
-        name=municipals[forecast_result.get("municipalID")][1],
+        key=municipals[forecast_result.get("municipalID")][1],
+        name=municipals[forecast_result.get("municipalID")][0],
     )
     consumer_group = models.ConsumerGroup(
         key=consumer_groups[forecast_result.get("consumerGroupID")][0],
@@ -125,7 +126,7 @@ def build_response(responses, request, municipals, consumer_groups, forecast_res
     )
 
 
-def accumulate_by_municipals(forecast_results: list[dict]) -> typing.Dict:
+def accumulate_by_municipals(forecast_results: list[dict], municipals: dict) -> typing.Dict:
     # %% Convert the dictionaries into pydantic objects
     forecast_results = [models.ForecastResult.parse_obj(o) for o in forecast_results]
     # %% Create an empty dataframe which will contain the data
@@ -169,6 +170,7 @@ def accumulate_by_municipals(forecast_results: list[dict]) -> typing.Dict:
             "startYear": years.get(municipal)[0],
             "endYear": years.get(municipal)[-1],
             "usages": usages.get(municipal),
+            "displayName": municipals.get(municipal),
         }
         reference_aggregation_dict.update({municipal: return_values})
     # %% Transform the forecast aggregation data
@@ -188,12 +190,15 @@ def accumulate_by_municipals(forecast_results: list[dict]) -> typing.Dict:
             "startYear": years.get(municipal)[0],
             "endYear": years.get(municipal)[-1],
             "usages": usages.get(municipal),
+            "displayName": municipals.get(municipal),
         }
         forecast_aggregation_dict.update({municipal: return_values})
     return {"reference": reference_aggregation_dict, "forecast": forecast_aggregation_dict}
 
 
-def accumulate_by_consumer_groups(forecast_results: list[dict]) -> typing.Dict:
+def accumulate_by_consumer_groups(
+    forecast_results: list[dict], consumer_groups: dict
+) -> typing.Dict:
     # %% Convert the dictionaries into pydantic objects
     forecast_results = [models.ForecastResult.parse_obj(o) for o in forecast_results]
     # %% Create an empty dataframe which will contain the data
@@ -241,6 +246,7 @@ def accumulate_by_consumer_groups(forecast_results: list[dict]) -> typing.Dict:
             "startYear": years.get(cg)[0],
             "endYear": years.get(cg)[-1],
             "usages": usages.get(cg),
+            "displayName": consumer_groups.get(cg),
         }
         reference_aggregation_dict.update({cg: return_values})
     # %% Transform the forecast aggregation data
@@ -257,9 +263,10 @@ def accumulate_by_consumer_groups(forecast_results: list[dict]) -> typing.Dict:
         usages.get(cg, None).append(usage)
     for cg in years:
         return_values = {
-            "startYear": years.get(cg)[0],
-            "endYear": years.get(cg)[-1],
+            "startYear": int(years.get(cg)[0]),
+            "endYear": int(years.get(cg)[-1]),
             "usages": usages.get(cg),
+            "displayName": consumer_groups.get(cg),
         }
         forecast_aggregation_dict.update({cg: return_values})
     return {"reference": reference_aggregation_dict, "forecast": forecast_aggregation_dict}

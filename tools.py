@@ -74,3 +74,35 @@ def get_consumer_group_names_from_query(consumer_group_ids):
     for row in result:
         mapping.update({row[0]: (row[1], row[2])})
     return mapping
+
+
+def get_inverted_municipal_mapping(municipal_mapping: dict):
+    municipal_name_query = select(
+        [
+            database.tables.municipals.c.id,
+            database.tables.municipals.c.name,
+            database.tables.municipals.c.key,
+        ],
+        database.tables.municipals.c.id.in_(municipal_mapping.keys()),
+    )
+    result = database.engine.execute(municipal_name_query).all()
+    mapping = {}
+    for row in result:
+        mapping.update({row[2]: row[1]})
+    return mapping
+
+
+def get_inverted_consumer_group_mapping(consumer_group: dict):
+    consumer_group_parameter_query = select(
+        [
+            database.tables.consumer_groups.c.id,
+            database.tables.consumer_groups.c.parameter,
+            database.tables.consumer_groups.c.name,
+        ],
+        database.tables.consumer_groups.c.id.in_(consumer_group.keys()),
+    )
+    result = database.engine.execute(consumer_group_parameter_query).all()
+    mapping = {}
+    for row in result:
+        mapping.update({row[1]: row[2]})
+    return mapping
