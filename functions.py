@@ -187,8 +187,8 @@ def accumulate_by_municipals(forecast_results: list[dict], municipals: dict) -> 
         usages.get(municipal, None).append(usage)
     for municipal in years:
         return_values = {
-            "startYear": years.get(municipal)[0],
-            "endYear": years.get(municipal)[-1],
+            "startYear": int(years.get(municipal)[0]),
+            "endYear": int(years.get(municipal)[-1]),
             "usages": usages.get(municipal),
             "displayName": municipals.get(municipal),
         }
