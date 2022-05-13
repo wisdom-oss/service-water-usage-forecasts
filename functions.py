@@ -141,7 +141,7 @@ def accumulate_by_municipals(forecast_results: list[dict]) -> typing.Dict:
         _df = pandas.DataFrame(ref_rows, columns=["municipal", "year", "usage"])
         df_reference_usages = pandas.concat([df_reference_usages, _df], ignore_index=True)
         # Create the row values for the forecast data
-        forecast_municipal = [r.municipal.key for _ in r.forecast.usages]
+        forecast_municipal = [r.municipal.key for _ in r.forecast.usages.amounts]
         forecast_years = [str(y) for y in range(r.forecast.usages.start, r.forecast.usages.end + 1)]
         forecast_rows = zip(forecast_municipal, forecast_years, r.forecast.usages.amounts)
         # Concatenate the forecasted data values
