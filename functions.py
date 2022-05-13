@@ -167,8 +167,8 @@ def accumulate_by_municipals(forecast_results: list[dict], municipals: dict) -> 
         usages.get(municipal, None).append(usage)
     for municipal in years:
         return_values = {
-            "startYear": years.get(municipal)[0],
-            "endYear": years.get(municipal)[-1],
+            "startYear": int(years.get(municipal)[0]),
+            "endYear": int(years.get(municipal)[-1]),
             "usages": usages.get(municipal),
             "displayName": municipals.get(municipal),
         }
@@ -243,8 +243,8 @@ def accumulate_by_consumer_groups(
         usages.get(cg, None).append(usage)
     for cg in years:
         return_values = {
-            "startYear": years.get(cg)[0],
-            "endYear": years.get(cg)[-1],
+            "startYear": int(years.get(cg)[0]),
+            "endYear": int(years.get(cg)[-1]),
             "usages": usages.get(cg),
             "displayName": consumer_groups.get(cg),
         }
