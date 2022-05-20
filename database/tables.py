@@ -10,7 +10,7 @@ usages = sqlalchemy.Table(
     "usages",
     water_usage_meta_data,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True, autoincrement=True),
-    sqlalchemy.Column("municipal", None, sqlalchemy.ForeignKey("geodata.nds_municipalities.id")),
+    sqlalchemy.Column("municipal", None, sqlalchemy.ForeignKey("geodata.shapes.id")),
     sqlalchemy.Column("consumer", None, sqlalchemy.ForeignKey("consumers.id")),
     sqlalchemy.Column("consumer_group", None, sqlalchemy.ForeignKey("consumer_group.id")),
     sqlalchemy.Column("year", sqlalchemy.Integer),
@@ -26,12 +26,13 @@ consumer_groups = sqlalchemy.Table(
     sqlalchemy.Column("parameter", sqlalchemy.Text),
 )
 
-municipals = sqlalchemy.Table(
-    "nds_municipalities",
+shapes = sqlalchemy.Table(
+    "shapes",
     geodata_meta_data,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True, autoincrement=True),
     sqlalchemy.Column("name", sqlalchemy.Text),
-    sqlalchemy.Column("key", sqlalchemy.Text)
+    sqlalchemy.Column("key", sqlalchemy.Text),
+    sqlalchemy.Column("nuts_key", sqlalchemy.Text),
 )
 
 districts = sqlalchemy.Table(
@@ -39,7 +40,7 @@ districts = sqlalchemy.Table(
     geodata_meta_data,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True, autoincrement=True),
     sqlalchemy.Column("name", sqlalchemy.Text),
-    sqlalchemy.Column("key", sqlalchemy.Text)
+    sqlalchemy.Column("key", sqlalchemy.Text),
 )
 
 
