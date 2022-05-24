@@ -12,7 +12,6 @@ from sqlalchemy.sql.functions import sum as sum_
 
 import database
 import database.tables
-import enums
 import functions
 import models
 import tools
@@ -35,19 +34,28 @@ def executor(message: bytes) -> bytes:
     """Parse the message and run the appropriate actions"""
     request: models.ForecastQuery = models.ForecastQuery.parse_raw(message)
     # %% Get the municipals which are within the districts
-    municipal_keys = [k for k in request.keys if len(k) == 8]
-    district_keys = [k for k in request.keys if len(k) == 5]
+    regex = r""
+    for key in request.keys:
+        if len(key) < 12:
+            regex += rf"^{key}\d+$|"
+        else:
+            regex += rf"^{key}$|"
+    regex = regex.strip("|")
     # %% Get the municipals within a district
-    for key in district_keys:
-        municipal_query = select(
-            [database.tables.municipals.c.key], database.tables.municipals.c.key.startswith(key)
-        )
-        results = database.engine.execute(municipal_query)
-        municipal_keys += [res[0] for res in results]
+    municipal_query = select(
+        [database.tables.shapes.c.key],
+        sqlalchemy.and_(
+            database.tables.shapes.c.key.regexp_match(regex),
+            sqlalchemy.func.length(database.tables.shapes.c.key) == 12,
+        ),
+    )
+    results = database.engine.execute(municipal_query).all()
+    municipal_keys = [res[0] for res in results]
+    _executor_logger.debug("GOT keys: %s", municipal_keys)
     # %% Get the primary keys for the municipals
     municipal_keys = list(set(municipal_keys))
     municipal_id_query = select(
-        [database.tables.municipals.c.id], database.tables.municipals.c.key.in_(municipal_keys)
+        [database.tables.shapes.c.id], database.tables.shapes.c.key.in_(municipal_keys)
     )
     results = database.engine.execute(municipal_id_query).all()
     municipal_ids = [row[0] for row in results]
@@ -61,29 +69,33 @@ def executor(message: bytes) -> bytes:
     # %% Get the water usage data for every municipal and consumer group
     data_query = select(
         [
-            database.tables.usages.c.municipal,
+            database.tables.usages.c.shape,
             database.tables.usages.c.consumer_group,
             database.tables.usages.c.year,
             sum_(database.tables.usages.c.value),
         ],
         sqlalchemy.and_(
-            database.tables.usages.c.municipal.in_(municipal_ids),
+            database.tables.usages.c.shape.in_(municipal_ids),
             database.tables.usages.c.consumer_group.in_(consumer_group_ids),
         ),
     ).group_by(
-        database.tables.usages.c.municipal,
+        database.tables.usages.c.shape,
         database.tables.usages.c.consumer_group,
         database.tables.usages.c.year,
     )
+    _executor_logger.info("Pulling water usage data")
     data_query_results = database.engine.execute(data_query).all()
     usage_data = pandas.DataFrame(data_query_results)
-    municipal_usage_data = dict(tuple(usage_data.groupby("municipal")))
+    _executor_logger.info("Grouping the water usage data by their municipals")
+    municipal_usage_data = dict(tuple(usage_data.groupby("shape")))
     forecast_results = []
     single_forecast_responses = []
     municipals = tools.get_municipal_names_from_query(municipal_ids)
     consumer_groups = tools.get_consumer_group_names_from_query(consumer_group_ids)
     inverted_municipals = tools.get_inverted_municipal_mapping(municipals)
     inverted_consumer_groups = tools.get_inverted_consumer_group_mapping(consumer_groups)
+    municipal_accumulation = {}
+    consumer_group_accumulation = {}
     with concurrent.futures.ThreadPoolExecutor() as tpe:
         forecast_parameters = []
         for municipal, data in municipal_usage_data.items():
@@ -110,8 +122,10 @@ def executor(message: bytes) -> bytes:
                     }
                 )
         calc_threads = tpe.map(lambda args: functions.run_forecast(**args), forecast_parameters)
+        _executor_logger.info("Running forecasts in threads")
         while len(forecast_results) < len(forecast_parameters):
             time.sleep(0.05)
+        _executor_logger.info("Finished forecast calculation")
         response_builder_threads = tpe.map(
             lambda forecast_result: functions.build_response(
                 single_forecast_responses, request, municipals, consumer_groups, forecast_result
@@ -120,16 +134,25 @@ def executor(message: bytes) -> bytes:
         )
         while len(single_forecast_responses) < len(forecast_parameters):
             time.sleep(0.05)
+        _executor_logger.info("Finished partial response building")
+        municipal_accumulation_future = tpe.submit(
+            functions.accumulate_by_municipals, single_forecast_responses, inverted_municipals
+        )
+        consumer_group_accumulation_future = tpe.submit(
+            functions.accumulate_by_consumer_groups,
+            single_forecast_responses,
+            inverted_consumer_groups,
+        )
+        municipal_accumulation = municipal_accumulation_future.result()
+        consumer_group_accumulation = consumer_group_accumulation_future.result()
+
     # %% Accumulate the forecasted data into municipals and consumer groups
     response = {
         "partials": single_forecast_responses,
         "accumulations": {
-            "municipal": functions.accumulate_by_municipals(
-                single_forecast_responses, inverted_municipals
-            ),
-            "consumerGroup": functions.accumulate_by_consumer_groups(
-                single_forecast_responses, inverted_consumer_groups
-            ),
+            "municipal": municipal_accumulation,
+            "consumerGroup": consumer_group_accumulation,
         },
     }
-    return ujson.dumps(response, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    _executor_logger.info("Finished request handling. Returning response")
+    return ujson.dumps(response, ensure_ascii=False, sort_keys=False).encode("utf-8")

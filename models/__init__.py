@@ -48,10 +48,10 @@ class ForecastQuery(BaseModel):
         # Now check if the keys are present in the database
         shape_query = sql.select(
             [database.tables.shapes.c.key],
-            database.tables.shapes.c.key.in_(k),
+            database.tables.shapes.c.key.in_(v),
         )
         db_shapes = database.engine.execute(shape_query).all()
-        unrecognized_keys = [k for k in k if (k,) not in db_shapes]
+        unrecognized_keys = [k for k in v if (k,) not in db_shapes]
         if len(unrecognized_keys) > 0:
             raise ValueError(
                 f"The following keys have not been recognized by the module: {unrecognized_keys}"
@@ -123,6 +123,8 @@ class Municipal(BaseModel):
 
     name: str = pydantic.Field(default=..., alias="name")
     """The name of the municipal"""
+
+    nuts_key: str = pydantic.Field(default=..., alias="nutsKey")
 
 
 class ConsumerGroup(BaseModel):

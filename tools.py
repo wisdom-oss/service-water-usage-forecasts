@@ -47,16 +47,17 @@ async def is_host_available(host: str, port: int, timeout: int = 10) -> bool:
 def get_municipal_names_from_query(municipal_ids):
     municipal_name_query = select(
         [
-            database.tables.municipals.c.id,
-            database.tables.municipals.c.name,
-            database.tables.municipals.c.key,
+            database.tables.shapes.c.id,
+            database.tables.shapes.c.name,
+            database.tables.shapes.c.key,
+            database.tables.shapes.c.nuts_key,
         ],
-        database.tables.municipals.c.id.in_(municipal_ids),
+        database.tables.shapes.c.id.in_(municipal_ids),
     )
     result = database.engine.execute(municipal_name_query).all()
     mapping = {}
     for row in result:
-        mapping.update({row[0]: (row[1], row[2])})
+        mapping.update({row[0]: (row[1], row[2], row[3])})
     return mapping
 
 
@@ -79,16 +80,17 @@ def get_consumer_group_names_from_query(consumer_group_ids):
 def get_inverted_municipal_mapping(municipal_mapping: dict):
     municipal_name_query = select(
         [
-            database.tables.municipals.c.id,
-            database.tables.municipals.c.name,
-            database.tables.municipals.c.key,
+            database.tables.shapes.c.id,
+            database.tables.shapes.c.name,
+            database.tables.shapes.c.key,
+            database.tables.shapes.c.nuts_key,
         ],
-        database.tables.municipals.c.id.in_(municipal_mapping.keys()),
+        database.tables.shapes.c.id.in_(municipal_mapping.keys()),
     )
     result = database.engine.execute(municipal_name_query).all()
     mapping = {}
     for row in result:
-        mapping.update({row[2]: row[1]})
+        mapping.update({row[2]: (row[1], row[3])})
     return mapping
 
 
