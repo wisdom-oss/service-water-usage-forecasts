@@ -9,6 +9,7 @@ import time
 import typing
 
 import amqp_rpc_server
+import pika.exchange_type
 import pydantic.error_wrappers
 
 import server_functions
@@ -95,7 +96,9 @@ if __name__ == "__main__":
         exchange_name=_amqp_settings.bind_exchange,
         content_validator=server_functions.content_validator,
         executor=server_functions.executor,
-        max_reconnection_attempts=1,
+        max_reconnection_attempts=3,
+        exchange_type=pika.exchange_type.ExchangeType.direct,
+        queue_name="forecast-requests",
     )
     # Attach the signal handler
     signal.signal(signal.SIGTERM, signal_handler)
