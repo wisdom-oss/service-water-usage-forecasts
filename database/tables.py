@@ -1,4 +1,3 @@
-import sqlalchemy
 import sqlalchemy.dialects
 
 import database
@@ -20,7 +19,7 @@ usages = sqlalchemy.Table(
         "consumer_group", sqlalchemy.Integer, sqlalchemy.ForeignKey("consumer_group.id")
     ),
     sqlalchemy.Column("year", sqlalchemy.Integer),
-    sqlalchemy.Column("value", sqlalchemy.Numeric),
+    sqlalchemy.Column("value", sqlalchemy.Numeric(asdecimal=False)),
     sqlalchemy.Column("recorded", sqlalchemy.dialects.postgresql.TIMESTAMP(timezone=True)),
 )
 
