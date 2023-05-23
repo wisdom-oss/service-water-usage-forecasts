@@ -47,28 +47,27 @@ async def is_host_available(host: str, port: int, timeout: int = 10) -> bool:
 def get_municipal_names_from_query(municipal_ids):
     municipal_name_query = select(
         [
-            database.tables.shapes.c.id,
             database.tables.shapes.c.name,
             database.tables.shapes.c.key,
             database.tables.shapes.c.nuts_key,
         ],
-        database.tables.shapes.c.id.in_(municipal_ids),
+        database.tables.shapes.c.key.in_(municipal_ids),
     )
     result = database.engine.execute(municipal_name_query).all()
     mapping = {}
     for row in result:
-        mapping.update({row[0]: (row[1], row[2], row[3])})
+        mapping.update({row[1]: (row[0], row[1], row[2])})
     return mapping
 
 
 def get_consumer_group_names_from_query(consumer_group_ids):
     consumer_group_parameter_query = select(
         [
-            database.tables.consumer_groups.c.id,
-            database.tables.consumer_groups.c.parameter,
-            database.tables.consumer_groups.c.name,
+            database.tables.usage_types.c.id,
+            database.tables.usage_types.c.external_identifier,
+            database.tables.usage_types.c.name,
         ],
-        database.tables.consumer_groups.c.id.in_(consumer_group_ids),
+        database.tables.usage_types.c.id.in_(consumer_group_ids),
     )
     result = database.engine.execute(consumer_group_parameter_query).all()
     mapping = {}
@@ -80,28 +79,27 @@ def get_consumer_group_names_from_query(consumer_group_ids):
 def get_inverted_municipal_mapping(municipal_mapping: dict):
     municipal_name_query = select(
         [
-            database.tables.shapes.c.id,
             database.tables.shapes.c.name,
             database.tables.shapes.c.key,
             database.tables.shapes.c.nuts_key,
         ],
-        database.tables.shapes.c.id.in_(municipal_mapping.keys()),
+        database.tables.shapes.c.key.in_(municipal_mapping.keys()),
     )
     result = database.engine.execute(municipal_name_query).all()
     mapping = {}
     for row in result:
-        mapping.update({row[2]: (row[1], row[3])})
+        mapping.update({row[1]: (row[0], row[2])})
     return mapping
 
 
 def get_inverted_consumer_group_mapping(consumer_group: dict):
     consumer_group_parameter_query = select(
         [
-            database.tables.consumer_groups.c.id,
-            database.tables.consumer_groups.c.parameter,
-            database.tables.consumer_groups.c.name,
+            database.tables.usage_types.c.id,
+            database.tables.usage_types.c.external_identifier,
+            database.tables.usage_types.c.name,
         ],
-        database.tables.consumer_groups.c.id.in_(consumer_group.keys()),
+        database.tables.usage_types.c.id.in_(consumer_group.keys()),
     )
     result = database.engine.execute(consumer_group_parameter_query).all()
     mapping = {}

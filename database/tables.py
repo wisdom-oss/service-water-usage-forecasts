@@ -1,3 +1,4 @@
+import geoalchemy2
 import sqlalchemy.dialects
 
 import database
@@ -9,27 +10,24 @@ usages = sqlalchemy.Table(
     "usages",
     water_usage_meta_data,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True, autoincrement=True),
-    sqlalchemy.Column("shape", sqlalchemy.Integer, sqlalchemy.ForeignKey("geodata.shape.id")),
-    sqlalchemy.Column(
-        "consumer",
-        sqlalchemy.dialects.postgresql.UUID(as_uuid=True),
-        sqlalchemy.ForeignKey("consumers.id"),
+    sqlalchemy.Column("municipality", sqlalchemy.VARCHAR),
+    sqlalchemy.Column("date", sqlalchemy.TIMESTAMP),
+    sqlalchemy.Column("consumer", sqlalchemy.dialects.postgresql.UUID(as_uuid=True)),
+    sqlalchemy.Column("usage_type",
+                      sqlalchemy.dialects.postgresql.UUID(as_uuid=True),
+                      sqlalchemy.ForeignKey("usage_type.id")
     ),
-    sqlalchemy.Column(
-        "consumer_group", sqlalchemy.Integer, sqlalchemy.ForeignKey("consumer_group.id")
-    ),
-    sqlalchemy.Column("year", sqlalchemy.Integer),
-    sqlalchemy.Column("value", sqlalchemy.Numeric(asdecimal=False)),
-    sqlalchemy.Column("recorded", sqlalchemy.dialects.postgresql.TIMESTAMP(timezone=True)),
+    sqlalchemy.Column("recorded_at", sqlalchemy.TIMESTAMP),
+    sqlalchemy.Column("amount", sqlalchemy.dialects.postgresql.DOUBLE_PRECISION),
 )
 
-consumer_groups = sqlalchemy.Table(
-    "consumer_groups",
+usage_types = sqlalchemy.Table(
+    "usage_types",
     water_usage_meta_data,
     sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True, autoincrement=True),
     sqlalchemy.Column("name", sqlalchemy.Text),
     sqlalchemy.Column("description", sqlalchemy.Text),
-    sqlalchemy.Column("parameter", sqlalchemy.Text),
+    sqlalchemy.Column("external_identifier", sqlalchemy.Text),
 )
 
 shapes = sqlalchemy.Table(

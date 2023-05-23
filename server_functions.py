@@ -54,44 +54,39 @@ def executor(message: bytes) -> bytes:
     _executor_logger.debug("GOT keys: %s", municipal_keys)
     # %% Get the primary keys for the municipals
     municipal_keys = list(set(municipal_keys))
-    municipal_id_query = select(
-        [database.tables.shapes.c.id], database.tables.shapes.c.key.in_(municipal_keys)
-    )
-    results = database.engine.execute(municipal_id_query).all()
-    municipal_ids = [row[0] for row in results]
     # %% Convert the Consumer Groups into ids
-    consumer_group_id_query = select(
-        [database.tables.consumer_groups.c.id],
-        database.tables.consumer_groups.c.parameter.in_(request.consumer_groups),
+    usage_type_id_query = select(
+        [database.tables.usage_types.c.id],
+        database.tables.usage_types.c.external_identifier.in_(request.consumer_groups),
     )
-    cg_results = database.engine.execute(consumer_group_id_query).all()
-    consumer_group_ids = [row[0] for row in cg_results]
+    cg_results = database.engine.execute(usage_type_id_query).all()
+    usage_type_ids = [row[0] for row in cg_results]
     # %% Get the water usage data for every municipal and consumer group
     data_query = select(
         [
-            database.tables.usages.c.shape,
-            database.tables.usages.c.consumer_group,
-            database.tables.usages.c.year,
-            sum_(database.tables.usages.c.value),
+            database.tables.usages.c.municipality,
+            database.tables.usages.c.usage_type,
+            database.tables.usages.c.date,
+            sum_(database.tables.usages.c.amount),
         ],
         sqlalchemy.and_(
-            database.tables.usages.c.shape.in_(municipal_ids),
-            database.tables.usages.c.consumer_group.in_(consumer_group_ids),
+            database.tables.usages.c.municipality.in_(municipal_keys),
+            database.tables.usages.c.usage_type.in_(usage_type_ids),
         ),
     ).group_by(
-        database.tables.usages.c.shape,
-        database.tables.usages.c.consumer_group,
-        database.tables.usages.c.year,
+        database.tables.usages.c.municipality,
+        database.tables.usages.c.usage_type,
+        database.tables.usages.c.date,
     )
     _executor_logger.info("Pulling water usage data")
     data_query_results = database.engine.execute(data_query).all()
     usage_data = pandas.DataFrame(data_query_results)
     _executor_logger.info("Grouping the water usage data by their municipals")
-    municipal_usage_data = dict(tuple(usage_data.groupby("shape")))
+    municipal_usage_data = dict(tuple(usage_data.groupby("municipality")))
     forecast_results = []
     single_forecast_responses = []
-    municipals = tools.get_municipal_names_from_query(municipal_ids)
-    consumer_groups = tools.get_consumer_group_names_from_query(consumer_group_ids)
+    municipals = tools.get_municipal_names_from_query(municipal_keys)
+    consumer_groups = tools.get_consumer_group_names_from_query(usage_type_ids)
     inverted_municipals = tools.get_inverted_municipal_mapping(municipals)
     inverted_consumer_groups = tools.get_inverted_consumer_group_mapping(consumer_groups)
     municipal_accumulation = {}
@@ -99,15 +94,15 @@ def executor(message: bytes) -> bytes:
     with concurrent.futures.ThreadPoolExecutor() as tpe:
         forecast_parameters = []
         for municipal, data in municipal_usage_data.items():
-            for consumer_group, data in dict(tuple(data.groupby("consumer_group"))).items():
+            for consumer_group, data in dict(tuple(data.groupby("usage_type"))).items():
                 usages = []
                 years = []
                 data: pandas.DataFrame
-                data = data.sort_values(["year"])
+                data = data.sort_values(["date"])
                 for v in data["sum_1"]:
                     usages.append(v)
-                for v in data["year"]:
-                    years.append(int(v))
+                for v in data["date"]:
+                    years.append(v.year)
                 years = sorted(years)
                 forecast_parameters.append(
                     {

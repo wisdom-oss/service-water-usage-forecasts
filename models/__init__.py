@@ -61,13 +61,13 @@ class ForecastQuery(BaseModel):
     @pydantic.validator("consumer_groups", always=True)
     def check_consumer_groups(cls, v):
         if v is None:
-            consumer_group_pull_query = sql.select([database.tables.consumer_groups.c.parameter])
+            consumer_group_pull_query = sql.select([database.tables.usage_types.c.external_identifier])
             results = database.engine.execute(consumer_group_pull_query).all()
             return [row[0] for row in results]
         else:
             consumer_group_query = sql.select(
-                [database.tables.consumer_groups.c.parameter],
-                database.tables.consumer_groups.c.parameter.in_(v),
+                [database.tables.usage_types.c.external_identifier],
+                database.tables.usage_types.c.external_identifier.in_(v),
             )
             results = database.engine.execute(consumer_group_query).all()
             found_objects = [row[0] for row in results]
