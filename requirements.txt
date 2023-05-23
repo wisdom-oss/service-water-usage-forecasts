@@ -17,4 +17,4 @@ threadpoolctl==3.1.0
 typing_extensions==4.6.0
 tzdata==2023.3
 ujson==5.7.0
-amqp_rpc_server==1.2.3
+amqp_rpc_server==1.2.4
